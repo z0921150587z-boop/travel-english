@@ -7,7 +7,21 @@ let syncState='local';let pendingEv=[];
 function todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function addDays(ds,n){const d=new Date(ds+'T00:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function loadLocal(uid){try{const r=localStorage.getItem(KEY+':'+uid);if(r){const o=JSON.parse(r);if(o&&typeof o.day==='number')S=Object.assign(S,o);}}catch(e){}
-  if(!Array.isArray(S.ev))S.ev=[];if(typeof S.xp!=='number')S.xp=0;}
+  sanitize();}
+// 清掉任何指向不存在課程/項目的殘留資料，避免舊版或壞掉的雲端狀態讓畫面當掉
+function sanitize(){
+  if(!Array.isArray(S.ev))S.ev=[];
+  if(typeof S.xp!=='number'||!isFinite(S.xp))S.xp=0;
+  if(typeof S.day!=='number'||!isFinite(S.day)||S.day<0)S.day=0;
+  S.day=Math.min(S.day,LESSONS.length);
+  if(!S.done||typeof S.done!=='object')S.done={};
+  if(!S.srs||typeof S.srs!=='object')S.srs={};
+  Object.keys(S.done).forEach(d=>{const v=S.done[d];
+    if(typeof v!=='number'||!isFinite(v))delete S.done[d];
+    else if(v>=0&&!LESSONS[v])S.done[d]=-1;});
+  if(S.dest&&(!S.dest.items||!Array.isArray(S.dest.items)||!S.dest.name))S.dest=null;
+}
+function lessonName(i){return (i>=0&&LESSONS[i])?LESSONS[i].t:'';}
 function save(){S.updatedAt=Date.now();if(S.ev.length>2500)S.ev=S.ev.slice(-2500);
   try{localStorage.setItem(KEY+':'+(CURRENT_UID||'anon'),JSON.stringify(S));}catch(e){}
   if(typeof cloudSave==='function')cloudSave();}
@@ -51,12 +65,19 @@ function pickVoice(){if(!('speechSynthesis' in window))return;const vs=speechSyn
   voice=null;for(const p of pref){const v=vs.find(v=>v.name.includes(p));if(v){voice=v;break;}}
   if(!voice)voice=vs.find(v=>v.lang==='en-US')||vs.find(v=>v.lang&&v.lang.startsWith('en'))||null;}
 if('speechSynthesis' in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice;}
+let audioUnlocked=false;
+function unlockAudio(){
+  if(audioUnlocked)return;audioUnlocked=true;
+  try{if('speechSynthesis' in window){const u=new SpeechSynthesisUtterance('');u.volume=0;speechSynthesis.speak(u);}}catch(e){}
+  try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();}catch(e){}
+}
+['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,unlockAudio,{passive:true}));
 function say(t,rate){if(!('speechSynthesis' in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-US';if(voice)u.voice=voice;u.rate=rate||0.85;speechSynthesis.speak(u);}
 const SPK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
 
 /* ===== SOUND (WebAudio, no files) ===== */
 let AC=null;
-function tone(f,d,type,gain,when){if(!S.sound)return;try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();const o=AC.createOscillator(),g=AC.createGain();o.type=type||'sine';o.frequency.value=f;g.gain.value=0;o.connect(g);g.connect(AC.destination);const t=AC.currentTime+(when||0);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(gain||0.12,t+0.01);g.gain.exponentialRampToValueAtTime(0.0001,t+d);o.start(t);o.stop(t+d+0.05);}catch(e){}}
+function tone(f,d,type,gain,when){if(!S.sound)return;try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();const o=AC.createOscillator(),g=AC.createGain();o.type=type||'sine';o.frequency.value=f;g.gain.value=0;o.connect(g);g.connect(AC.destination);const t=AC.currentTime+(when||0);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(gain||0.12,t+0.01);g.gain.exponentialRampToValueAtTime(0.0001,t+d);o.start(t);o.stop(t+d+0.05);}catch(e){}}
 function sfx(kind){if(kind==='ok'){tone(660,0.12,'sine',0.1);tone(990,0.18,'sine',0.1,0.09);}else if(kind==='no'){tone(200,0.25,'triangle',0.12);}else if(kind==='done'){[523,659,784,1047].forEach((f,i)=>tone(f,0.35,'sine',0.1,i*0.12));}else if(kind==='tap'){tone(880,0.05,'sine',0.05);}}
 
 /* ===== STARS + CONFETTI ===== */
@@ -83,17 +104,24 @@ function norm(s){return s.toLowerCase().replace(/[^a-z0-9' ]/g,' ').replace(/\s+
 function stepbar(label,frac){return `<div class="stepbar"><span class="eyebrow">${label}</span><div class="progress"><i style="width:${Math.round(frac*100)}%"></i></div><button class="btn quiet" style="width:auto;padding:4px 8px" onclick="home()">離開</button></div>`;}
 
 /* ===== QUESTION BUILDER ===== */
-function makeQ(it,ctx,prodEarly,force){const pool=Object.values(ALL).filter(x=>x.type===it.type&&x.id!==it.id);const d=shuffle(pool).slice(0,3);
+function makeQ(it,ctx,prodEarly,force){
+  // 干擾選項：排除任何與本題「英文或中文」相同的項目，避免出現兩個都對的選項
+  const pool=Object.values(ALL).filter(x=>x.type===it.type&&x.id!==it.id&&x.en!==it.en&&x.zh!==it.zh);
+  const pickDistractors=(field)=>{const seen=new Set([it[field]]);const out=[];
+    for(const x of shuffle(pool)){const v=x[field];if(!v||seen.has(v))continue;seen.add(v);out.push(v);if(out.length===3)break;}
+    return out;};
   let n=stageOf(it.id);if(prodEarly)n+=1;let kind;
   if(ctx==='new')kind=it.type==='w'?['en2zh','zh2en','listen'][Math.floor(Math.random()*3)]:['listen','en2zh'][Math.floor(Math.random()*2)];
   else if(n<=1)kind=Math.random()<0.5?'en2zh':'zh2en';else if(n===2)kind='listen';else kind=it.type==='w'?'type':'build';
   if(force)kind=force;
+  // 單字句無法排句，改成拼字
+  if(kind==='build'&&String(it.en).trim().split(/\s+/).length<2)kind='type';
   const base={id:it.id,kind,item:it};
-  if(kind==='zh2en')return Object.assign(base,{prompt:it.zh,answer:it.en,opts:shuffle([it.en,...d.map(x=>x.en)]),optEn:true});
-  if(kind==='listen')return Object.assign(base,{answer:it.zh,opts:shuffle([it.zh,...d.map(x=>x.zh)]),optEn:false,speak:it.en});
+  if(kind==='zh2en')return Object.assign(base,{prompt:it.zh,answer:it.en,opts:shuffle([it.en,...pickDistractors('en')]),optEn:true});
+  if(kind==='listen')return Object.assign(base,{answer:it.zh,opts:shuffle([it.zh,...pickDistractors('zh')]),optEn:false,speak:it.en});
   if(kind==='type')return Object.assign(base,{prompt:it.zh,answer:it.en,speak:it.en});
-  if(kind==='build'){const words=it.en.split(' ');return Object.assign(base,{prompt:it.zh,answer:it.en,words,bank:shuffle(words.map((w,i)=>({w,i}))),speak:it.en});}
-  return Object.assign(base,{prompt:it.en,answer:it.zh,opts:shuffle([it.zh,...d.map(x=>x.zh)]),optEn:false,speak:it.en});}
+  if(kind==='build'){const words=String(it.en).trim().split(/\s+/);return Object.assign(base,{prompt:it.zh,answer:it.en,words,bank:shuffle(words.map((w,i)=>({w,i}))),speak:it.en});}
+  return Object.assign(base,{prompt:it.en,answer:it.zh,opts:shuffle([it.zh,...pickDistractors('zh')]),optEn:false,speak:it.en});}
 
 function runQuiz(label,qs,ctx,onDone){let i=0;const results=[];const retry=[];let t0=Date.now();
   const finishQ=(q,ok)=>{const ms=Date.now()-t0;const first=!q.isRetry;
