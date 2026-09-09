@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>旅途英語 · Night Flight</title>
+<meta name="description" content="每天 10 分鐘的旅遊與日常英語：情境課程、間隔記憶、目的地專屬單字。">
+<meta name="theme-color" content="#0B1026">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="旅途英語">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<canvas id="stars"></canvas>
+<div class="app">
+<header>
+  <div class="brand">旅途英語<small>Night Flight · 10 min</small></div>
+  <div class="stats">
+    <div class="stat"><b id="stStreak">0</b><span>連續天數</span></div>
+    <div class="stat"><b id="stXp">0</b><span>XP</span></div>
+  </div>
+</header>
+<main id="view" class="screen"></main>
+</div>
+<nav class="tabs" id="tabs" style="display:none"><div>
+<button class="tab on" data-tab="home" onclick="home()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>今天</button>
+<button class="tab" data-tab="dest" onclick="destScreen()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 3 10l8 3 3 8z"/></svg>目的地</button>
+<button class="tab" data-tab="data" onclick="dataScreen()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>數據</button>
+<button class="tab" data-tab="passport" onclick="passportScreen()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8 17h8"/></svg>護照</button>
+</div></nav>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="./config.js"></script>
+<script src="./data.js"></script>
+<script src="./dest.js"></script>
+<script src="./engine.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
