@@ -87,6 +87,7 @@ function home(){currentScreen='home';paintHeader();const t=todayStr();const done
     <div class="toggle"><span>答題音效</span><button class="sw ${S.sound?'on':''}" onclick="S.sound=!S.sound;save();home()" aria-label="音效"><i></i></button></div>
     <div class="toggle"><span>試聽發音</span><button class="speak" style="margin:0" onclick="say('Hello, welcome aboard.')">${SPK} Hello</button></div>
     <div class="toggle"><span>安裝到手機主畫面</span><button class="btn sm ghost" onclick="installScreen()">怎麼裝</button></div>
+    <div class="toggle"><span>邀請朋友一起學</span><button class="btn sm ghost" onclick="shareScreen()">分享</button></div>
     <div class="toggle"><span>${USER?esc(USER.email):'訪客模式'}</span><button class="btn sm quiet" onclick="signOut()">登出</button></div>
   </section>
   <p class="sync" id="sync"></p>`,'home');paintSync();}
@@ -205,6 +206,19 @@ function installScreen(){currentScreen='install';const ios=/iPhone|iPad/.test(na
     <h3 style="margin-top:16px">Android（Chrome）</h3><ol class="ol"><li>用 Chrome 開啟網址</li><li>右上角「⋮」→「安裝應用程式」或「加到主畫面」</li></ol>
     <p class="q" style="margin-top:14px">${ios?'你正在 iPhone 上，照上面步驟做即可。':''}</p></section>
   <button class="btn ghost" onclick="home()">回首頁</button>`,'home');}
+
+/* ===== SHARE ===== */
+function appUrl(){return location.origin+location.pathname.replace(/[^/]*$/,'');}
+function shareScreen(){currentScreen='share';const u=appUrl();
+  h(`<section class="card hero" style="text-align:center"><div class="eyebrow gold">邀請朋友</div><h1>掃碼或傳連結</h1><p class="q" style="margin-top:6px">對方打開 → 建立帳號 → 就能每天學。進度各自獨立。</p>
+    <div id="qr" style="display:inline-block;background:#fff;padding:12px;border-radius:14px;margin-top:16px"></div>
+    <p class="q" style="margin-top:12px;word-break:break-all;font-family:var(--mono);font-size:13px">${esc(u)}</p>
+    <div class="row" style="margin-top:14px"><button class="btn" onclick="navigator.share?navigator.share({title:'旅途英語',text:'每天 10 分鐘的旅遊英語',url:'${js(u)}'}):copyUrl()">傳給朋友</button><button class="btn ghost" onclick="copyUrl()">複製連結</button></div>
+    <p class="q" id="copied" style="margin-top:8px"></p></section>
+  <section class="card"><h3>朋友怎麼裝到手機</h3><p class="q" style="margin-top:6px">iPhone：Safari 開啟連結 → 分享 → 加入主畫面。Android：Chrome 開啟 → ⋮ → 安裝應用程式。</p></section>
+  <button class="btn ghost" onclick="home()">回首頁</button>`,'home');
+  try{new QRCode(document.getElementById('qr'),{text:u,width:180,height:180,colorDark:'#0B1026',colorLight:'#ffffff'});}catch(e){}}
+function copyUrl(){const u=appUrl();(navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>{document.getElementById('copied').textContent='已複製連結';},()=>{prompt('複製這個連結',u);});}
 
 /* ===== BOOT ===== */
 (async function boot(){stars();rebuildAll();initSb();
