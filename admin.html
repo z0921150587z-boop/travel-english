@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="icon" href="./icons/icon-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./styles.css?v5">
 <style>
 .app{max-width:1100px;padding-bottom:40px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -30,12 +30,12 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 <main id="view" class="screen"></main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="./config.js"></script>
-<script src="./data.js"></script>
-<script src="./dest.js"></script>
+<script src="./config.js?v5"></script>
+<script src="./data.js?v5"></script>
+<script src="./dest.js?v5"></script>
 <script>
 const view=document.getElementById('view');
-function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 function h(x){view.innerHTML=x;}
 let sb=null;try{sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY);}catch(e){}
 const NAMES={};LESSONS.forEach((L,li)=>{L.w.forEach((w,i)=>NAMES[li+'w'+i]=w[0]+'（'+w[1]+'）');L.s.forEach((s,i)=>NAMES[li+'s'+i]=s[0]);});
@@ -45,24 +45,27 @@ Object.keys(DEST_PACKS).forEach(k=>{const p=DEST_PACKS[k];(p.w||[]).forEach((w,i
 function login(msg){h(`<div class="auth" style="max-width:420px;margin:0 auto"><section class="card"><h2>管理員登入</h2><p class="q" style="margin-top:6px">只有 ${esc(CONFIG.ADMIN_EMAIL)} 可以進入。</p>
 <input class="input" id="em" type="email" placeholder="admin email" style="margin-top:14px" value="${esc(CONFIG.ADMIN_EMAIL)}"><input class="input" id="pw" type="password" placeholder="密碼" style="margin-top:10px" onkeydown="if(event.key==='Enter')go()"><div style="margin-top:10px"><button class="btn" onclick="go()">登入</button></div><p class="err" id="err">${esc(msg||'')}</p><p class="q" style="margin-top:8px">密碼與你在 App（index.html）註冊的相同。還沒註冊請先到 App 用這個 Email 建立帳號。</p></section></div>`);}
 async function go(){const em=document.getElementById('em').value.trim();const pw=document.getElementById('pw').value;const {data,error}=await sb.auth.signInWithPassword({email:em,password:pw});if(error){document.getElementById('err').textContent=error.message;return;}start(data.session);}
-async function start(session){if(!session||session.user.email.toLowerCase()!==CONFIG.ADMIN_EMAIL.toLowerCase()){await sb.auth.signOut();login('這個帳號不是管理員');return;}
-  document.getElementById('who').innerHTML=esc(session.user.email)+' · <button class="btn sm quiet" onclick="sb.auth.signOut().then(()=>login())">登出</button>';
+async function start(session){if(!session||!session.user||String(session.user.email||'').toLowerCase()!==String(CONFIG.ADMIN_EMAIL).toLowerCase()){await sb.auth.signOut();login('這個帳號不是管理員');return;}
+  document.getElementById('who').innerHTML=esc(session.user.email)+' · <button class="btn sm quiet" onclick="sb.auth.signOut().then(()=>location.reload())">登出</button>';
   h('<p class="tip">載入中…</p>');
   const since=new Date(Date.now()-30*86400000).toISOString();
-  const [pr,ev,daily,hard]=await Promise.all([
-    sb.from('profiles').select('*').order('last_active',{ascending:false}),
-    sb.from('events').select('user_id,ts,ok,ctx,kind').gte('ts',since).limit(50000),
-    sb.from('admin_daily').select('*').limit(30),
-    sb.from('admin_hard_items').select('*')]);
-  if(pr.error){h(`<section class="card"><p class="err">讀取失敗：${esc(pr.error.message)}。請確認已執行 schema.sql，且管理員 email 一致。</p></section>`);return;}
-  render(pr.data||[],ev.data||[],daily.data||[],hard.data||[]);}
-function dstr(d){const x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
+  try{
+    const [pr,ev,daily,hard]=await Promise.all([
+      sb.from('profiles').select('*').order('last_active',{ascending:false}),
+      sb.from('events').select('user_id,ts,ok,ctx,kind').gte('ts',since).limit(50000),
+      sb.from('admin_daily').select('*').limit(30),
+      sb.from('admin_hard_items').select('*')]);
+    if(pr.error){h(`<section class="card"><p class="err">讀取失敗：${esc(pr.error.message)}。請確認已執行 schema.sql，且管理員 email 一致。</p></section>`);return;}
+    render(pr.data||[],ev.data||[],daily.data||[],hard.data||[]);
+  }catch(e){h(`<section class="card"><p class="err">連線異常：${esc(e.message||e)}</p></section>`);}}
+function dstr(d){const x=new Date(d);return isNaN(x)?'—':x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');}
 let PROFILES=[],SORT='last_active',DIR=-1;
 function render(profiles,events,daily,hard){PROFILES=profiles;const now=Date.now();const day=86400000;
-  const active=(n)=>new Set(events.filter(e=>now-new Date(e.ts).getTime()<n*day).map(e=>e.user_id)).size;
-  const newUsers7=profiles.filter(p=>now-new Date(p.created_at).getTime()<7*day).length;
-  const acc7=(()=>{const r=events.filter(e=>now-new Date(e.ts).getTime()<7*day);return r.length?r.filter(e=>e.ok).length/r.length:null;})();
-  const retained=profiles.filter(p=>p.days_done>=7).length;
+  const ts=(v)=>{const t=new Date(v).getTime();return isNaN(t)?0:t;};
+  const active=(n)=>new Set(events.filter(e=>now-ts(e.ts)<n*day).map(e=>e.user_id)).size;
+  const newUsers7=profiles.filter(p=>p.created_at&&now-ts(p.created_at)<7*day).length;
+  const acc7=(()=>{const r=events.filter(e=>now-ts(e.ts)<7*day);return r.length?r.filter(e=>e.ok).length/r.length:null;})();
+  const retained=profiles.filter(p=>(p.days_done||0)>=7).length;
   const dmap={};daily.forEach(d=>dmap[d.day]=d);const days=[];for(let i=13;i>=0;i--){const d=dstr(now-i*day);days.push({d,v:dmap[d]});}
   const maxU=Math.max(1,...days.map(x=>x.v?x.v.active_users:0));
   h(`<div class="kpis">
@@ -76,21 +79,22 @@ function render(profiles,events,daily,hard){PROFILES=profiles;const now=Date.now
   </div>
   <div class="two">
     <section class="card"><h2>每日活躍使用者（14 天）</h2><div class="bars">${days.map(x=>`<div class="bar" style="height:${x.v?Math.max(4,Math.round(x.v.active_users/maxU*100)):2}%" data-t="${x.d.slice(5)} · ${x.v?x.v.active_users:0} 人 · ${x.v?x.v.answers:0} 題" tabindex="0"></div>`).join('')}</div><div class="axis"><span>${days[0].d.slice(5)}</span><span>今天</span></div></section>
-    <section class="card"><h2>每日正確率（14 天）</h2><div class="bars">${days.map(x=>x.v?`<div class="bar ${x.v.accuracy<0.65?'low':'gold'}" style="height:${Math.max(4,Math.round(x.v.accuracy*100))}%" data-t="${x.d.slice(5)} · ${Math.round(x.v.accuracy*100)}% · ${(x.v.avg_ms/1000).toFixed(1)}s" tabindex="0"></div>`:`<div class="bar empty" style="height:2px"></div>`).join('')}</div><div class="axis"><span>${days[0].d.slice(5)}</span><span>今天</span></div></section>
+    <section class="card"><h2>每日正確率（14 天）</h2><div class="bars">${days.map(x=>x.v?`<div class="bar ${x.v.accuracy<0.65?'low':'gold'}" style="height:${Math.max(4,Math.round((x.v.accuracy||0)*100))}%" data-t="${x.d.slice(5)} · ${Math.round((x.v.accuracy||0)*100)}% · ${((x.v.avg_ms||0)/1000).toFixed(1)}s" tabindex="0"></div>`:`<div class="bar empty" style="height:2px"></div>`).join('')}</div><div class="axis"><span>${days[0].d.slice(5)}</span><span>今天</span></div></section>
   </div>
   <section class="card"><h2>使用者（${profiles.length}）</h2><p class="q">點欄位標題可排序。狀態：3 天內活躍＝活躍；7 天以上未回來＝流失風險</p>
     <div class="tw" id="tbl"></div></section>
   <div class="two">
-    <section class="card"><h2>全體最難的字</h2><p class="q">作答 ≥5 次、正確率最低</p><div class="tw"><table><thead><tr><th>項目</th><th>作答</th><th>正確率</th></tr></thead><tbody>${hard.slice(0,20).map(x=>`<tr><td>${esc(NAMES[x.item_id]||x.item_id)}</td><td class="num">${x.n}</td><td class="num" style="color:${x.accuracy<0.5?'var(--bad)':'inherit'}">${Math.round(x.accuracy*100)}%</td></tr>`).join('')||'<tr><td colspan=3 class="q">尚無資料</td></tr>'}</tbody></table></div></section>
-    <section class="card"><h2>目的地分布</h2><div class="tw"><table><thead><tr><th>目的地</th><th>人數</th></tr></thead><tbody>${Object.entries(profiles.reduce((a,p)=>{const k=p.dest_name||'（未設定）';a[k]=(a[k]||0)+1;return a;},{})).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div>
-      <h2 style="margin-top:18px">程度分布</h2><div class="tw"><table><tbody>${Object.entries(profiles.reduce((a,p)=>{const k={beginner:'初級',elementary:'初中級',intermediate:'中級'}[p.level]||'—';a[k]=(a[k]||0)+1;return a;},{})).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')}</tbody></table></div></section>
+    <section class="card"><h2>全體最難的字</h2><p class="q">作答 ≥5 次、正確率最低</p><div class="tw"><table><thead><tr><th>項目</th><th>作答</th><th>正確率</th></tr></thead><tbody>${hard.slice(0,20).map(x=>`<tr><td>${esc(NAMES[x.item_id]||x.item_id)}</td><td class="num">${x.n}</td><td class="num" style="color:${x.accuracy<0.5?'var(--bad)':'inherit'}">${Math.round((x.accuracy||0)*100)}%</td></tr>`).join('')||'<tr><td colspan=3 class="q">尚無資料</td></tr>'}</tbody></table></div></section>
+    <section class="card"><h2>目的地分布</h2><div class="tw"><table><thead><tr><th>目的地</th><th>人數</th></tr></thead><tbody>${Object.entries(profiles.reduce((a,p)=>{const k=p.dest_name||'（未設定）';a[k]=(a[k]||0)+1;return a;},{})).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')||'<tr><td colspan=2 class="q">尚無資料</td></tr>'}</tbody></table></div>
+      <h2 style="margin-top:18px">程度分布</h2><div class="tw"><table><tbody>${Object.entries(profiles.reduce((a,p)=>{const k={beginner:'初級',elementary:'初中級',intermediate:'中級'}[p.level]||'—';a[k]=(a[k]||0)+1;return a;},{})).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')||'<tr><td colspan=2 class="q">尚無資料</td></tr>'}</tbody></table></div></section>
   </div>`);
   table();}
 function table(){const now=Date.now();const rows=PROFILES.slice().sort((a,b)=>{let x=a[SORT],y=b[SORT];if(x==null)x=-1;if(y==null)y=-1;return (x>y?1:x<y?-1:0)*DIR;});
   const cols=[['name','名字'],['email','Email'],['level','程度'],['dest_name','目的地'],['streak','連續'],['lessons_done','完成課數'],['days_done','學習天'],['xp','XP'],['retention','記憶率'],['last_active','最後活躍'],['created_at','加入']];
-  document.getElementById('tbl').innerHTML=`<table><thead><tr>${cols.map(c=>`<th onclick="SORT='${c[0]}';DIR=SORT==='${SORT}'?-DIR:-1;table()">${c[1]}${SORT===c[0]?(DIR<0?' ↓':' ↑'):''}</th>`).join('')}<th>狀態</th></tr></thead><tbody>${rows.map(p=>{const idle=(now-new Date(p.last_active).getTime())/86400000;const st=idle<3?['ok','活躍']:idle<7?['off','沉睡']:['warn','流失風險'];
-    return `<tr><td>${esc(p.name)}</td><td>${esc(p.email)}</td><td>${({beginner:'初級',elementary:'初中級',intermediate:'中級'})[p.level]||'—'}</td><td>${esc(p.dest_name||'—')}</td><td class="num">${p.streak||0}</td><td class="num">${p.lessons_done||0}</td><td class="num">${p.days_done||0}</td><td class="num">${p.xp||0}</td><td class="num">${p.retention==null?'—':Math.round(p.retention*100)+'%'}</td><td class="num">${dstr(p.last_active)}</td><td class="num">${dstr(p.created_at)}</td><td><span class="pill ${st[0]}">${st[1]}</span></td></tr>`;}).join('')}</tbody></table>`;}
-(async()=>{if(!sb||CONFIG.SUPABASE_URL.includes('YOUR-')){h('<section class="card"><p class="err">尚未設定 config.js 的 Supabase 金鑰。</p></section>');return;}const {data}=await sb.auth.getSession();if(data&&data.session)start(data.session);else login();})();
+  document.getElementById('tbl').innerHTML=`<table><thead><tr>${cols.map(c=>`<th onclick="SORT='${c[0]}';DIR=SORT==='${SORT}'?-DIR:-1;table()">${c[1]}${SORT===c[0]?(DIR<0?' ↓':' ↑'):''}</th>`).join('')}<th>狀態</th></tr></thead><tbody>${rows.length?rows.map(p=>{const lt=new Date(p.last_active).getTime();const idle=isNaN(lt)?999:(now-lt)/86400000;const st=idle<3?['ok','活躍']:idle<7?['off','沉睡']:['warn','流失風險'];
+    return `<tr><td>${esc(p.name)}</td><td>${esc(p.email)}</td><td>${({beginner:'初級',elementary:'初中級',intermediate:'中級'})[p.level]||'—'}</td><td>${esc(p.dest_name||'—')}</td><td class="num">${p.streak||0}</td><td class="num">${p.lessons_done||0}</td><td class="num">${p.days_done||0}</td><td class="num">${p.xp||0}</td><td class="num">${p.retention==null?'—':Math.round(p.retention*100)+'%'}</td><td class="num">${dstr(p.last_active)}</td><td class="num">${dstr(p.created_at)}</td><td><span class="pill ${st[0]}">${st[1]}</span></td></tr>`;}).join(''):'<tr><td colspan=12 class="q">尚無使用者</td></tr>'}</tbody></table>`;}
+(async()=>{if(!sb||CONFIG.SUPABASE_URL.includes('YOUR-')){h('<section class="card"><p class="err">尚未設定 config.js 的 Supabase 金鑰。</p></section>');return;}
+  try{const {data}=await sb.auth.getSession();if(data&&data.session)start(data.session);else login();}catch(e){login('連線異常，請重新整理');}})();
 </script>
 </body>
 </html>
