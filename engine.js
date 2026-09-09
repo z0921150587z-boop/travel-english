@@ -83,10 +83,11 @@ function norm(s){return s.toLowerCase().replace(/[^a-z0-9' ]/g,' ').replace(/\s+
 function stepbar(label,frac){return `<div class="stepbar"><span class="eyebrow">${label}</span><div class="progress"><i style="width:${Math.round(frac*100)}%"></i></div><button class="btn quiet" style="width:auto;padding:4px 8px" onclick="home()">離開</button></div>`;}
 
 /* ===== QUESTION BUILDER ===== */
-function makeQ(it,ctx,prodEarly){const pool=Object.values(ALL).filter(x=>x.type===it.type&&x.id!==it.id);const d=shuffle(pool).slice(0,3);
+function makeQ(it,ctx,prodEarly,force){const pool=Object.values(ALL).filter(x=>x.type===it.type&&x.id!==it.id);const d=shuffle(pool).slice(0,3);
   let n=stageOf(it.id);if(prodEarly)n+=1;let kind;
   if(ctx==='new')kind=it.type==='w'?['en2zh','zh2en','listen'][Math.floor(Math.random()*3)]:['listen','en2zh'][Math.floor(Math.random()*2)];
   else if(n<=1)kind=Math.random()<0.5?'en2zh':'zh2en';else if(n===2)kind='listen';else kind=it.type==='w'?'type':'build';
+  if(force)kind=force;
   const base={id:it.id,kind,item:it};
   if(kind==='zh2en')return Object.assign(base,{prompt:it.zh,answer:it.en,opts:shuffle([it.en,...d.map(x=>x.en)]),optEn:true});
   if(kind==='listen')return Object.assign(base,{answer:it.zh,opts:shuffle([it.zh,...d.map(x=>x.zh)]),optEn:false,speak:it.en});
@@ -96,7 +97,7 @@ function makeQ(it,ctx,prodEarly){const pool=Object.values(ALL).filter(x=>x.type=
 
 function runQuiz(label,qs,ctx,onDone){let i=0;const results=[];const retry=[];let t0=Date.now();
   const finishQ=(q,ok)=>{const ms=Date.now()-t0;const first=!q.isRetry;
-    if(first){results.push({id:q.id,ok});logEv(q.id,ok,q.kind,ms,ctx);if(!ok)retry.push(Object.assign({},makeQ(q.item,ctx,false),{isRetry:true,kind:q.kind==='type'||q.kind==='build'?q.kind:'zh2en'}));}
+    if(first){results.push({id:q.id,ok});logEv(q.id,ok,q.kind,ms,ctx);if(!ok)retry.push(Object.assign(makeQ(q.item,ctx,false,q.kind==='type'||q.kind==='build'?q.kind:'zh2en'),{isRetry:true}));}
     if(ok)S.xp+=first?(q.kind==='type'||q.kind==='build'?15:10):5;sfx(ok?'ok':'no');paintHeader();};
   const render=()=>{const q=qs[i];const n=qs.length;t0=Date.now();
     const head=q.kind==='listen'?`<div class="q">聽一聽，選出意思</div><button class="speak gold" style="margin:6px 0 16px;font-size:18px;padding:12px 20px" onclick="say('${js(q.speak)}',0.85)">${SPK} 播放</button>`
