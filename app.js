@@ -13,29 +13,28 @@ async function cloudLoad(){if(!sb||!CURRENT_UID)return;try{const {data}=await sb
 function paintSync(){const el=document.getElementById('sync');if(el)el.textContent=syncState==='cloud'?'已同步雲端 · 手機與電腦共用進度':(sb?'離線中，進度先存在此裝置':'尚未連接資料庫，進度只存在此裝置');}
 function paintHeader(){const s=document.getElementById('stStreak'),x=document.getElementById('stXp');if(s)s.innerHTML=(streak()>0?'<span class="flame">🔥</span>':'')+streak();if(x)x.textContent=S.xp;}
 
-/* ===== AUTH ===== */
-function authScreen(msg){currentScreen='auth';
+/* ===== AUTH (email + password; no email server needed) ===== */
+function authScreen(msg,mode){currentScreen='auth';mode=mode||'login';
   h(`<div class="auth"><div class="logo">旅途英語<small>NIGHT FLIGHT · 10 MIN A DAY</small></div>
-  <section class="card"><h2>用 Email 登入</h2><p class="q" style="margin-top:6px">輸入 Email，我們寄 6 位數驗證碼給你。不用密碼，進度跨裝置同步。</p>
+  <section class="card"><h2>${mode==='signup'?'建立帳號':'登入'}</h2><p class="q" style="margin-top:6px">${mode==='signup'?'設一組密碼（至少 6 碼）。進度會跨裝置同步。':'輸入 Email 與密碼。'}</p>
   <input class="input" id="em" type="email" placeholder="you@example.com" style="margin-top:14px" autocomplete="email">
-  <div style="margin-top:10px"><button class="btn" id="sendBtn" onclick="sendCode()">寄驗證碼</button></div>
-  <p class="err" id="authErr" style="margin-top:8px">${msg||''}</p></section>
+  <input class="input" id="pw" type="password" placeholder="密碼" style="margin-top:10px" autocomplete="${mode==='signup'?'new-password':'current-password'}" onkeydown="if(event.key==='Enter')authGo('${mode}')">
+  <div style="margin-top:10px"><button class="btn" id="goBtn" onclick="authGo('${mode}')">${mode==='signup'?'建立並開始':'登入'}</button></div>
+  <p class="err" id="authErr" style="margin-top:8px">${msg||''}</p>
+  <div class="row" style="margin-top:6px">${mode==='signup'?'<button class="btn quiet" onclick="authScreen(\'\',\'login\')">已有帳號？登入</button>':'<button class="btn quiet" onclick="authScreen(\'\',\'signup\')">還沒有帳號？建立</button><button class="btn quiet" onclick="forgot()">忘記密碼</button>'}</div></section>
   ${!sb?'<p class="tip">（尚未設定資料庫，先以訪客模式試用）</p><button class="btn ghost" onclick="guest()">訪客試用</button>':''}
   </div>`);}
-async function sendCode(){const em=document.getElementById('em').value.trim();const err=document.getElementById('authErr');if(!/^\S+@\S+\.\S+$/.test(em)){err.textContent='請輸入正確的 Email';return;}
-  document.getElementById('sendBtn').disabled=true;err.textContent='';
-  const {error}=await sb.auth.signInWithOtp({email:em,options:{shouldCreateUser:true}});
-  if(error){err.textContent='寄送失敗：'+error.message;document.getElementById('sendBtn').disabled=false;return;}
-  h(`<div class="auth"><div class="logo">旅途英語<small>CHECK YOUR INBOX</small></div>
-  <section class="card"><h2>輸入驗證碼</h2><p class="q" style="margin-top:6px">已寄到 ${esc(em)}，有效 10 分鐘。沒收到請看垃圾郵件。</p>
-  <input class="input big" id="code" inputmode="numeric" maxlength="8" placeholder="······" style="margin-top:14px" autocomplete="one-time-code">
-  <div style="margin-top:10px"><button class="btn" onclick="verifyCode('${js(em)}')">登入</button></div>
-  <p class="err" id="authErr" style="margin-top:8px"></p>
-  <button class="btn quiet" onclick="authScreen()">換一個 Email</button></section></div>`);
-  document.getElementById('code').focus();}
-async function verifyCode(em){const code=document.getElementById('code').value.trim();const err=document.getElementById('authErr');
-  const {data,error}=await sb.auth.verifyOtp({email:em,token:code,type:'email'});if(error){err.textContent='驗證失敗：'+error.message;return;}
-  await onSignedIn(data.session);}
+async function authGo(mode){const em=document.getElementById('em').value.trim();const pw=document.getElementById('pw').value;const err=document.getElementById('authErr');
+  if(!/^\S+@\S+\.\S+$/.test(em)){err.textContent='請輸入正確的 Email';return;}if(pw.length<6){err.textContent='密碼至少 6 碼';return;}
+  document.getElementById('goBtn').disabled=true;err.textContent='';
+  const r=mode==='signup'?await sb.auth.signUp({email:em,password:pw}):await sb.auth.signInWithPassword({email:em,password:pw});
+  if(r.error){const m=r.error.message||'';err.textContent=/already registered|already exists/i.test(m)?'這個 Email 已有帳號，請直接登入':/Invalid login/i.test(m)?'Email 或密碼錯誤':'失敗：'+m;document.getElementById('goBtn').disabled=false;return;}
+  if(!r.data.session){err.textContent='請到信箱確認後再登入';document.getElementById('goBtn').disabled=false;return;}
+  await onSignedIn(r.data.session);}
+async function forgot(){const em=(document.getElementById('em')||{}).value||'';const err=document.getElementById('authErr');if(!/^\S+@\S+\.\S+$/.test(em.trim())){err.textContent='先在上面填 Email，再按忘記密碼';return;}
+  const {error}=await sb.auth.resetPasswordForEmail(em.trim(),{redirectTo:location.href.split('#')[0]});err.textContent=error?'寄送失敗：'+error.message:'重設信已寄出，請到信箱點連結後回來設定新密碼';}
+function resetScreen(){currentScreen='reset';h(`<div class="auth"><div class="logo">旅途英語<small>NEW PASSWORD</small></div><section class="card"><h2>設定新密碼</h2><input class="input" id="pw" type="password" placeholder="新密碼（至少 6 碼）" style="margin-top:14px"><div style="margin-top:10px"><button class="btn" onclick="doReset()">儲存</button></div><p class="err" id="authErr"></p></section></div>`);}
+async function doReset(){const pw=document.getElementById('pw').value;const err=document.getElementById('authErr');if(pw.length<6){err.textContent='密碼至少 6 碼';return;}const {error}=await sb.auth.updateUser({password:pw});if(error){err.textContent=error.message;return;}const {data}=await sb.auth.getSession();history.replaceState(null,'',location.pathname);await onSignedIn(data.session);}
 async function signOut(){if(sb)await sb.auth.signOut();CURRENT_UID=null;USER=null;PROFILE=null;S={day:0,done:{},srs:{},ev:[],xp:0,autoplay:true,sound:true,dest:null,updatedAt:0,v:3};authScreen();}
 function guest(){CURRENT_UID='guest';USER=null;loadLocal('guest');rebuildAll();PROFILE=JSON.parse(localStorage.getItem('te-guest-profile')||'null');if(!PROFILE)onboard();else home();}
 async function onSignedIn(session){USER=session.user;CURRENT_UID=USER.id;loadLocal(CURRENT_UID);await cloudLoad();rebuildAll();
@@ -212,6 +211,7 @@ function installScreen(){currentScreen='install';const ios=/iPhone|iPad/.test(na
   if('serviceWorker' in navigator){try{navigator.serviceWorker.register('./sw.js');}catch(e){}}
   if(!sb){authScreen();return;}
   const {data}=await sb.auth.getSession();
+  if(location.hash.includes('type=recovery')){resetScreen();return;}
   if(data&&data.session)await onSignedIn(data.session);else authScreen();
-  sb.auth.onAuthStateChange((ev,session)=>{if(ev==='SIGNED_OUT'){CURRENT_UID=null;}});
+  sb.auth.onAuthStateChange((ev,session)=>{if(ev==='SIGNED_OUT'){CURRENT_UID=null;}if(ev==='PASSWORD_RECOVERY'){resetScreen();}});
 })();
