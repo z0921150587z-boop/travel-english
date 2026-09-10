@@ -2,7 +2,7 @@
 const KEY='travel-english-v3';
 const INTERVALS=[1,3,7,14,30,60,120];
 const LEVELS=[[0,'新手旅客'],[300,'背包客'],[900,'探險家'],[2000,'環球旅人'],[4000,'領航員'],[7000,'傳奇旅人']];
-let S={day:0,done:{},srs:{},ev:[],xp:0,autoplay:true,sound:true,dest:null,updatedAt:0,v:3};
+let S={day:0,done:{},log:[],round:1,srs:{},ev:[],xp:0,autoplay:true,sound:true,dest:null,updatedAt:0,v:4};
 let syncState='local';let pendingEv=[];
 function todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function addDays(ds,n){const d=new Date(ds+'T00:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -20,7 +20,16 @@ function sanitize(){
     if(typeof v!=='number'||!isFinite(v))delete S.done[d];
     else if(v>=0&&!LESSONS[v])S.done[d]=-1;});
   if(S.dest&&(!S.dest.items||!Array.isArray(S.dest.items)||!S.dest.name))S.dest=null;
+  if(!Array.isArray(S.log))S.log=[];
+  S.log=S.log.filter(x=>x&&typeof x.li==='number'&&LESSONS[x.li]&&typeof x.d==='string');
+  // 舊資料：把 done 裡的課程補進 log
+  Object.keys(S.done).forEach(d=>{const v=S.done[d];if(v>=0&&LESSONS[v]&&!S.log.some(x=>x.d===d&&x.li===v))S.log.push({d,li:v});});
+  if(typeof S.round!=='number'||S.round<1)S.round=1;
+  if(typeof S.startLesson!=='number')S.startLesson=0;
 }
+function logArr(){if(!S||typeof S!=='object')return[];if(!Array.isArray(S.log))S.log=[];return S.log;}
+function completedSet(){const st=new Set();logArr().forEach(x=>st.add(x.li));Object.values(S.done).forEach(v=>{if(v>=0&&LESSONS[v])st.add(v);});return st;}
+function lessonsToday(){const t=todayStr();return logArr().filter(x=>x.d===t).length;}
 function lessonName(i){return (i>=0&&LESSONS[i])?LESSONS[i].t:'';}
 function save(){S.updatedAt=Date.now();if(S.ev.length>2500)S.ev=S.ev.slice(-2500);
   try{localStorage.setItem(KEY+':'+(CURRENT_UID||'anon'),JSON.stringify(S));}catch(e){}
@@ -96,7 +105,7 @@ function confetti(){if(matchMedia('(prefers-reduced-motion:reduce)').matches)ret
 /* ===== UI helpers ===== */
 const view=document.getElementById('view');
 let currentScreen='home';
-function h(html,tab){view.innerHTML=html;window.scrollTo({top:0});document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===tab));const tb=document.getElementById('tabs');if(tb)tb.style.display=tab?'':'none';}
+function h(html,tab){try{if('speechSynthesis' in window)speechSynthesis.cancel();}catch(e){}view.innerHTML=html;window.scrollTo({top:0});document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===tab));const tb=document.getElementById('tabs');if(tb)tb.style.display=tab?'':'none';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 function js(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
@@ -110,7 +119,7 @@ function makeQ(it,ctx,prodEarly,force){
   const pickDistractors=(field)=>{const seen=new Set([it[field]]);const out=[];
     for(const x of shuffle(pool)){const v=x[field];if(!v||seen.has(v))continue;seen.add(v);out.push(v);if(out.length===3)break;}
     return out;};
-  let n=stageOf(it.id);if(prodEarly)n+=1;let kind;
+  let n=stageOf(it.id);if(prodEarly||S.round>1)n+=1;let kind;
   if(ctx==='new')kind=it.type==='w'?['en2zh','zh2en','listen'][Math.floor(Math.random()*3)]:['listen','en2zh'][Math.floor(Math.random()*2)];
   else if(n<=1)kind=Math.random()<0.5?'en2zh':'zh2en';else if(n===2)kind='listen';else kind=it.type==='w'?'type':'build';
   if(force)kind=force;
@@ -123,9 +132,9 @@ function makeQ(it,ctx,prodEarly,force){
   if(kind==='build'){const words=String(it.en).trim().split(/\s+/);return Object.assign(base,{prompt:it.zh,answer:it.en,words,bank:shuffle(words.map((w,i)=>({w,i}))),speak:it.en});}
   return Object.assign(base,{prompt:it.en,answer:it.zh,opts:shuffle([it.zh,...pickDistractors('zh')]),optEn:false,speak:it.en});}
 
-function runQuiz(label,qs,ctx,onDone){let i=0;const results=[];const retry=[];let t0=Date.now();
+function runQuiz(label,qs,ctx,onDone,opts){opts=opts||{};let i=0;const results=[];const retry=[];let t0=Date.now();
   const finishQ=(q,ok)=>{const ms=Date.now()-t0;const first=!q.isRetry;
-    if(first){results.push({id:q.id,ok});logEv(q.id,ok,q.kind,ms,ctx);if(!ok)retry.push(Object.assign(makeQ(q.item,ctx,false,q.kind==='type'||q.kind==='build'?q.kind:'zh2en'),{isRetry:true}));}
+    if(first){results.push({id:q.id,ok});logEv(q.id,ok,q.kind,ms,ctx);if(!ok&&!opts.noRetry)retry.push(Object.assign(makeQ(q.item,ctx,false,q.kind==='type'||q.kind==='build'?q.kind:'zh2en'),{isRetry:true}));}
     if(ok)S.xp+=first?(q.kind==='type'||q.kind==='build'?15:10):5;sfx(ok?'ok':'no');paintHeader();};
   const render=()=>{const q=qs[i];const n=qs.length;t0=Date.now();
     const head=q.kind==='listen'?`<div class="q">聽一聽，選出意思</div><button class="speak gold" style="margin:6px 0 16px;font-size:18px;padding:12px 20px" onclick="say('${js(q.speak)}',0.85)">${SPK} 播放</button>`
