@@ -35,23 +35,61 @@ async function forgot(){const em=(document.getElementById('em')||{}).value||'';c
   const {error}=await sb.auth.resetPasswordForEmail(em.trim(),{redirectTo:location.href.split('#')[0]});err.textContent=error?'寄送失敗：'+error.message:'重設信已寄出，請到信箱點連結後回來設定新密碼';}
 function resetScreen(){currentScreen='reset';h(`<div class="auth"><div class="logo">旅途英語<small>NEW PASSWORD</small></div><section class="card"><h2>設定新密碼</h2><input class="input" id="pw" type="password" placeholder="新密碼（至少 6 碼）" style="margin-top:14px"><div style="margin-top:10px"><button class="btn" onclick="doReset()">儲存</button></div><p class="err" id="authErr"></p></section></div>`);}
 async function doReset(){const pw=document.getElementById('pw').value;const err=document.getElementById('authErr');if(pw.length<6){err.textContent='密碼至少 6 碼';return;}const {error}=await sb.auth.updateUser({password:pw});if(error){err.textContent=error.message;return;}const {data}=await sb.auth.getSession();history.replaceState(null,'',location.pathname);await onSignedIn(data.session);}
-async function signOut(){if(sb)await sb.auth.signOut();try{localStorage.removeItem('te-guest-profile');}catch(e){}CURRENT_UID=null;USER=null;PROFILE=null;S={day:0,done:{},srs:{},ev:[],xp:0,autoplay:true,sound:true,dest:null,updatedAt:0,v:3};rebuildAll();authScreen();}
+async function signOut(){if(sb)await sb.auth.signOut();try{localStorage.removeItem('te-guest-profile');}catch(e){}CURRENT_UID=null;USER=null;PROFILE=null;S={day:0,done:{},log:[],round:1,srs:{},ev:[],xp:0,autoplay:true,sound:true,dest:null,updatedAt:0,v:4};rebuildAll();authScreen();}
 function guest(){CURRENT_UID='guest';USER=null;loadLocal('guest');rebuildAll();try{PROFILE=JSON.parse(localStorage.getItem('te-guest-profile')||'null');}catch(e){PROFILE=null;}if(!PROFILE)onboard();else home();}
 async function onSignedIn(session){USER=session.user;CURRENT_UID=USER.id;loadLocal(CURRENT_UID);await cloudLoad();rebuildAll();
   try{const {data}=await sb.from('profiles').select('*').eq('id',CURRENT_UID).maybeSingle();PROFILE=data;}catch(e){PROFILE=null;}
   if(!PROFILE||!PROFILE.name){onboard();}else home();}
 
-/* ===== ONBOARDING ===== */
+/* ===== ONBOARDING：名字 → 程度測驗 → 選起點 → 目的地 ===== */
 let OB={};
+const START_POINTS=[[0,'從第 1 課開始','打招呼、數字、時間、家人、食物——把基礎打穩'],[7,'從第 8 課開始','跳過最基礎的招呼與數字，從家人、飲食、日常作息開始'],[14,'從第 15 課開始','直接進入機場、飯店、餐廳、購物等旅遊情境']];
+function placementItems(){ // 從整套教材平均抽 12 個單字：前段 4、中段 4、後段 4
+  const pick=(from,to,n)=>{const pool=[];for(let li=from;li<to;li++)LESSONS[li].w.forEach((w,i)=>pool.push(li+'w'+i));return shuffle(pool).slice(0,n);};
+  return [...pick(0,7,4),...pick(7,28,4),...pick(28,56,4)];}
 function onboard(step){step=step||0;currentScreen='onboard';
-  if(step===0)h(`<div class="auth"><div class="logo">歡迎登機<small>STEP 1 / 3</small></div><section class="card"><h2>怎麼稱呼你？</h2><input class="input" id="obName" placeholder="你的名字或暱稱" style="margin-top:14px" value="${esc(OB.name||'')}"><div style="margin-top:12px"><button class="btn" onclick="OB.name=document.getElementById('obName').value.trim().slice(0,24)||'旅人';onboard(1)">下一步</button></div></section></div>`);
-  else if(step===1)h(`<div class="auth"><div class="logo">你的起點<small>STEP 2 / 3</small></div><section class="card"><h2>目前英文程度？</h2><div class="opts" style="margin-top:14px">${[['beginner','初級','看得懂簡單句子，開口困難'],['elementary','初中級','會基本對話，旅遊常卡住'],['intermediate','中級','日常溝通可以，想更自然']].map(o=>`<button class="opt" onclick="OB.level='${o[0]}';onboard(2)"><b>${o[1]}</b><div class="q">${o[2]}</div></button>`).join('')}</div></section></div>`);
-  else if(step===2)h(`<div class="auth"><div class="logo">目的地<small>STEP 3 / 3</small></div><section class="card"><h2>最近要去哪裡？</h2><p class="q" style="margin-top:6px">可以先跳過，之後在「目的地」分頁設定。</p><div class="chips">${Object.keys(DEST_PACKS).slice(0,12).map(k=>`<button class="chip" onclick="OB.dest='${k}';finishOnboard()">${esc(DEST_PACKS[k].name)}</button>`).join('')}</div><div style="margin-top:14px"><button class="btn ghost" onclick="finishOnboard()">先跳過</button></div></section></div>`);}
-async function finishOnboard(){PROFILE={id:CURRENT_UID,name:OB.name||'旅人',level:OB.level||'beginner',email:USER?USER.email:null};
+  if(step===0)h(`<div class="auth"><div class="logo">歡迎登機<small>STEP 1 / 4</small></div><section class="card"><h2>怎麼稱呼你？</h2><input class="input" id="obName" placeholder="你的名字或暱稱" style="margin-top:14px" value="${esc(OB.name||'')}" onkeydown="if(event.key==='Enter')document.getElementById('obNext').click()"><div style="margin-top:12px"><button class="btn" id="obNext" onclick="OB.name=document.getElementById('obName').value.trim().slice(0,24)||'旅人';onboard(1)">下一步</button></div></section></div>`);
+  else if(step===1)h(`<div class="auth"><div class="logo">程度測驗<small>STEP 2 / 4 · 約 2 分鐘</small></div><section class="card"><h2>先做 12 題，找出適合你的起點</h2><p class="q" style="margin-top:6px">單字從整套教材平均抽出，不用緊張、不會就猜。做完系統會給建議，最後還是你自己決定從哪裡開始。</p>
+    <div style="margin-top:14px"><button class="btn" onclick="placementTest()">開始測驗</button></div><button class="btn quiet" style="margin-top:6px" onclick="OB.score=null;onboard(2)">跳過測驗，我自己選</button></section></div>`);
+  else if(step===2){const sc=OB.score;const sug=sc==null?null:(sc.pct<0.5?0:sc.pct<0.85?1:2);
+    h(`<div class="auth"><div class="logo">你的起點<small>STEP 3 / 4</small></div><section class="card">
+    ${sc?`<div class="eyebrow gold">測驗結果</div><h2 style="margin-top:6px">${sc.ok} / ${sc.n} 題正確</h2><p class="q" style="margin-top:6px">${sc.pct<0.5?'基礎字還不熟，建議從頭開始，前幾課會很快。':sc.pct<0.85?'基礎不錯，可以跳過最簡單的部分。':'大部分都會了，直接進旅遊情境最有效率；之前的課隨時可以回頭練。'}</p>`:`<h2>你想從哪裡開始？</h2>`}
+    <div class="opts" style="margin-top:14px">${START_POINTS.map((o,i)=>`<button class="opt" onclick="OB.start=${o[0]};onboard(3)"><b>${o[1]}${sug===i?' <span class="xp">建議</span>':''}</b><div class="q">${o[2]}</div></button>`).join('')}</div>
+    <p class="q" style="margin-top:10px">之後在「設定 → 重新測程度／改起點」隨時可以改。</p></section></div>`);}
+  else if(step===3)h(`<div class="auth"><div class="logo">目的地<small>STEP 4 / 4</small></div><section class="card"><h2>最近要去哪裡？</h2><p class="q" style="margin-top:6px">可以先跳過，之後在「目的地」分頁設定。</p><div class="chips">${Object.keys(DEST_PACKS).slice(0,12).map(k=>`<button class="chip" onclick="OB.dest='${k}';finishOnboard()">${esc(DEST_PACKS[k].name)}</button>`).join('')}</div><div style="margin-top:14px"><button class="btn ghost" onclick="finishOnboard()">先跳過</button></div></section></div>`);}
+function placementTest(){const ids=placementItems();rebuildAll();
+  const qs=ids.map((id,i)=>makeQ(ALL[id],'review',false,i%2?'zh2en':'en2zh'));
+  currentScreen='placement';
+  runQuiz('程度測驗',qs,'placement',(results)=>{const ok=results.filter(r=>r.ok).length;OB.score={ok,n:results.length,pct:ok/results.length};
+    // 測驗答對的字直接標成已認得（不用再從零學），答錯的不記
+    results.forEach(r=>{if(r.ok){S.srs[r.id]={n:2,due:addDays(todayStr(),7),seen:1,miss:0};}});
+    onboard(2);},{noRetry:true});}
+function applyStart(start){S.day=Math.max(S.day,start);S.startLesson=start;}
+async function finishOnboard(){PROFILE={id:CURRENT_UID,name:OB.name||'旅人',level:OB.start===14?'intermediate':OB.start===7?'elementary':'beginner',email:USER?USER.email:null};
+  applyStart(OB.start||0);
   if(OB.dest&&DEST_PACKS[OB.dest]){const p=DEST_PACKS[OB.dest];S.dest={slug:OB.dest,name:p.name,tips:p.tips||[],items:destItems(p,OB.dest),createdAt:Date.now()};rebuildAll();}
   if(sb&&USER){try{await sb.from('profiles').upsert({id:CURRENT_UID,email:USER.email,name:PROFILE.name,level:PROFILE.level,created_at:new Date().toISOString(),last_active:new Date().toISOString()});}catch(e){}}
   else{try{localStorage.setItem('te-guest-profile',JSON.stringify(PROFILE));}catch(e){}}
   save();home();}
+/* 設定 → 重新測程度／改起點 */
+function relevelScreen(){currentScreen='relevel';
+  h(`<section class="card"><div class="eyebrow gold">重新選擇起點</div><h1>換一個起點</h1><p class="q" style="margin-top:6px">目前進度：第 ${Math.min(S.day+1,LESSONS.length)} 課。往前跳不會刪除任何紀錄；往回選會從那一課重新往下走，已完成的印章保留。</p>
+    <div class="opts" style="margin-top:14px">${START_POINTS.map(o=>`<button class="opt" onclick="S.day=${o[0]};S.startLesson=${o[0]};save();home()"><b>${o[1]}</b><div class="q">${o[2]}</div></button>`).join('')}
+      <button class="opt" onclick="OB={name:PROFILE?PROFILE.name:'旅人'};placementTest2()"><b>重做程度測驗</b><div class="q">12 題，做完再選起點</div></button></div></section>
+  <section class="card"><div class="eyebrow coral">危險區</div><h3 style="margin-top:6px">重設所有進度</h3><p class="q" style="margin-top:6px">清空課程進度、記憶排程、XP、印章與目的地（帳號保留）。無法復原。</p>
+    <div class="field"><input id="rsIn" placeholder="輸入「重設」以確認"><button class="btn sm coral" onclick="resetAll()">重設</button></div><p class="err" id="rsErr"></p></section>
+  <button class="btn ghost" onclick="home()">回首頁</button>`,'home');}
+function placementTest2(){const ids=placementItems();const qs=ids.map((id,i)=>makeQ(ALL[id],'review',false,i%2?'zh2en':'en2zh'));
+  runQuiz('程度測驗',qs,'placement',(results)=>{const ok=results.filter(r=>r.ok).length;const pct=ok/results.length;const sug=pct<0.5?0:pct<0.85?1:2;
+    h(`<section class="card"><div class="eyebrow gold">測驗結果</div><h1>${ok} / ${results.length}</h1><p class="q" style="margin-top:6px">建議：${START_POINTS[sug][1]}</p>
+      <div class="opts" style="margin-top:14px">${START_POINTS.map((o,i)=>`<button class="opt" onclick="S.day=${o[0]};S.startLesson=${o[0]};save();home()"><b>${o[1]}${sug===i?' <span class=\'xp\'>建議</span>':''}</b><div class="q">${o[2]}</div></button>`).join('')}</div></section>
+      <button class="btn ghost" onclick="home()">維持目前進度</button>`,'home');},{noRetry:true});}
+async function resetAll(){const v=(document.getElementById('rsIn')||{}).value||'';if(v.trim()!=='重設'){document.getElementById('rsErr').textContent='請輸入「重設」兩個字';return;}
+  const keep={autoplay:S.autoplay,sound:S.sound};
+  S={day:0,done:{},log:[],round:1,srs:{},ev:[],xp:0,autoplay:keep.autoplay,sound:keep.sound,dest:null,updatedAt:Date.now(),v:4};rebuildAll();
+  try{localStorage.setItem(KEY+':'+CURRENT_UID,JSON.stringify(S));}catch(e){}
+  if(sb&&CURRENT_UID&&CURRENT_UID!=='guest'){try{await sb.from('progress').upsert({user_id:CURRENT_UID,state:S,updated_at:new Date().toISOString()});await sb.from('profiles').upsert({id:CURRENT_UID,xp:0,streak:0,lessons_done:0,days_done:0,dest_name:null,retention:null,last_active:new Date().toISOString()});}catch(e){}}
+  OB={name:PROFILE?PROFILE.name:'旅人'};onboard(1);}
 
 /* ===== HOME ===== */
 function ring(pct,label,sub){const r=54,c=2*Math.PI*r;return `<div class="ring"><svg viewBox="0 0 132 132"><defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FB4FF"/><stop offset="1" stop-color="#F5C451"/></linearGradient></defs><circle class="bg" cx="66" cy="66" r="${r}"/><circle class="fg" cx="66" cy="66" r="${r}" stroke-dasharray="${c}" stroke-dashoffset="${c*(1-pct)}"/></svg><div class="lbl"><b>${label}</b><span>${sub}</span></div></div>`;}
@@ -61,12 +99,15 @@ function home(){currentScreen='home';paintHeader();const t=todayStr();const done
   const name=PROFILE?PROFILE.name:'旅人';const hour=new Date().getHours();const greet=hour<11?'早安':hour<18?'午安':'晚安';
   let top;
   const heroHead=`<div class="eyebrow gold">${greet}，${esc(name)}</div>`;
-  if(doneToday){top=`<section class="card hero">${heroHead}<div class="herorow">${ring(1,'✓','DONE')}<div><h1 style="margin:0">今天完成了</h1><p class="q" style="margin-top:6px">明天的複習與新課已排好。</p><div class="level" style="margin-top:10px">${esc(lv.name)} · ${S.xp} XP</div></div></div>
-    <div style="margin-top:18px" class="row">${(S.done[t]>=0&&LESSONS[S.done[t]])?`<button class="btn ghost" onclick="startLesson(${S.done[t]},true)">再練今天的課</button>`:''}${due?`<button class="btn ghost" onclick="startReviewOnly()">複習 ${due} 題</button>`:''}${destN?`<button class="btn coral" onclick="startDestDrill()">目的地衝刺</button>`:''}</div></section>`;}
+  if(doneToday&&!finished){const nToday=lessonsToday();top=`<section class="card hero">${heroHead}<div class="herorow">${ring(1,'✓','DONE')}<div><h1 style="margin:0">今天完成了</h1><p class="q" style="margin-top:6px">今天已學 ${nToday} 課。想繼續？下一課是「${esc(L.t)}」。</p><div class="level" style="margin-top:10px">${esc(lv.name)} · ${S.xp} XP</div></div></div>
+    ${nToday>=3?`<p class="q" style="margin-top:12px">提醒：一天超過 3 課，記憶效果會下降——分散到明天更記得住。當然，想繼續也可以。</p>`:''}
+    <div style="margin-top:18px" class="row"><button class="btn" onclick="startLesson(${li},false)">繼續學下一課</button>${due?`<button class="btn ghost" onclick="startReviewOnly()">複習 ${due} 題</button>`:''}${destN?`<button class="btn coral" onclick="startDestDrill()">目的地衝刺</button>`:''}</div></section>`;}
   else if(P.mode==='consolidate'){top=`<section class="card hero">${heroHead}<div class="eyebrow coral" style="margin-top:8px">系統調整 · 鞏固日</div><h1>今天不學新的，把舊的記牢</h1><p class="q" style="margin-top:10px">${esc(P.reason)}</p>
     <div class="plan"><div><span>到期複習</span><span>${Math.min(due,P.reviewCap)} 題</span></div><div><span>弱點重學</span><span>最常錯的 6 個</span></div><div><span>重測</span><span>6 題</span></div></div>
     <div style="margin-top:18px"><button class="btn coral" onclick="startConsolidate()">開始鞏固訓練</button></div></section>`;}
-  else if(finished){top=`<section class="card hero">${heroHead}<h1>全部 56 課完成</h1><p class="q" style="margin-top:10px">只剩複習，保持手感。今天到期 ${due} 題。</p><div style="margin-top:18px" class="row"><button class="btn" onclick="startReviewOnly()" ${due?'':'disabled'}>開始複習</button>${destN?`<button class="btn coral" onclick="startDestDrill()">目的地衝刺</button>`:''}</div></section>`;}
+  else if(finished){top=`<section class="card hero">${heroHead}<div class="eyebrow gold" style="margin-top:8px">第 ${S.round} 周目 · 全部 56 課完成</div><h1>畢業了。接下來是自由飛行</h1><p class="q" style="margin-top:10px">每天：到期複習 ${due} 題 + 挑戰模式 10 題，讓記憶維持在長期區。想再深一層就開二周目。</p>
+    <div style="margin-top:18px" class="row"><button class="btn" onclick="startReviewOnly()" ${due?'':'disabled'}>複習 ${due} 題</button><button class="btn coral" onclick="startChallenge()">挑戰模式</button></div>
+    <div class="row" style="margin-top:10px"><button class="btn ghost" onclick="passportScreen()">看畢業證書</button><button class="btn ghost" onclick="startRound2()">開始第 ${S.round+1} 周目</button></div></section>`;}
   else{top=`<section class="card hero">${heroHead}<div class="herorow">${ring(0,String(li+1).padStart(2,'0'),'LESSON')}<div style="flex:1;min-width:0"><h1 style="margin:0;font-size:26px">${esc(L.t)}</h1><div class="level" style="margin-top:10px">${esc(lv.name)}${lv.next?' · 距下一級 '+(lv.next-S.xp)+' XP':''}</div><div class="lvbar"><i style="width:${Math.round(lvPct*100)}%"></i></div></div></div>
     <div class="plan">
       <div><span>情境對話</span><span>先聽一遍</span></div>
@@ -80,14 +121,15 @@ function home(){currentScreen='home';paintHeader();const t=todayStr();const done
   h(`${top}
   <div class="grid3"><div class="mini"><b>${Object.keys(S.srs).length}</b><span>已學單字與句子</span></div><div class="mini"><b>${P.acc===null?'—':Math.round(P.acc*100)+'%'}</b><span>7 天記憶率</span></div><div class="mini"><b>${due}</b><span>今日到期</span></div></div>
   ${!S.dest?`<section class="card" style="border-style:dashed;background:transparent;box-shadow:none"><h2>要去哪個國家？</h2><p class="q" style="margin-top:6px">設定目的地後，每天自動加練該國專屬單字與句子。</p><div style="margin-top:12px"><button class="btn ghost" onclick="destScreen()">設定目的地</button></div></section>`:''}
-  <section class="card"><h2>航線圖</h2><div class="lessons" style="margin-top:8px">${LESSONS.map((L,i)=>{const st=i<S.day?'done':(i===S.day?'now':'locked');
-    return `<button class="lesson ${st}" ${st==='locked'?'disabled':''} onclick="startLesson(${i},true)"><span class="n">${String(i+1).padStart(2,'0')}</span><span class="t">${esc(L.t)}</span><span class="s">${st==='done'?'✓ 完成':st==='now'?'今天':'—'}</span></button>`;}).join('')}</div></section>
+  <section class="card"><h2>航線圖</h2><div class="lessons" style="margin-top:8px">${(()=>{const got=completedSet();return LESSONS.map((L,i)=>{const st=got.has(i)?'done':(i===S.day?'now':(i<S.day?'skipped':'locked'));
+    return `<button class="lesson ${st}" ${st==='locked'?'disabled':''} onclick="startLesson(${i},${st==='done'?'true':'false'})"><span class="n">${String(i+1).padStart(2,'0')}</span><span class="t">${esc(L.t)}</span><span class="s">${st==='done'?'✓ 完成':st==='now'?'下一課':st==='skipped'?'跳過 · 可補':'—'}</span></button>`;}).join('');})()}</div></section>
   <section class="card"><h2>設定</h2>
     <div class="toggle" style="margin-top:8px"><span>翻到單字時自動朗讀</span><button class="sw ${S.autoplay?'on':''}" onclick="S.autoplay=!S.autoplay;save();home()" aria-label="自動朗讀"><i></i></button></div>
     <div class="toggle"><span>答題音效</span><button class="sw ${S.sound?'on':''}" onclick="S.sound=!S.sound;save();home()" aria-label="音效"><i></i></button></div>
     <div class="toggle"><span>試聽發音</span><button class="speak" style="margin:0" onclick="say('Hello, welcome aboard.')">${SPK} Hello</button></div>
     <div class="toggle"><span>安裝到手機主畫面</span><button class="btn sm ghost" onclick="installScreen()">怎麼裝</button></div>
     <div class="toggle"><span>邀請朋友一起學</span><button class="btn sm ghost" onclick="shareScreen()">分享</button></div>
+    <div class="toggle"><span>重新測程度／改起點／重設</span><button class="btn sm ghost" onclick="relevelScreen()">開啟</button></div>
     <div class="toggle"><span>${USER?esc(USER.email):'訪客模式'}</span><button class="btn sm quiet" onclick="signOut()">登出</button></div>
   </section>
   <p class="sync" id="sync"></p>`,'home');paintSync();}
@@ -153,18 +195,31 @@ function stepQuiz(){currentScreen='quiz';const pool=shuffle(sess.words.filter(Bo
   const qs=pool.map(it=>makeQ(it,ctx,false));
   runQuiz(sess.consolidate?'重測':'小測驗',qs,ctx,(results)=>{const t=todayStr();
     if(sess.consolidate){results.forEach(r=>grade(r.id,r.ok));if(!has(t))S.done[t]=-1;S.xp+=30;save();}
-    else if(!sess.practice){sess.words.forEach(it=>{const r=results.find(x=>x.id===it.id);grade(it.id,r?r.ok:true);});if(!has(t)){S.done[t]=sess.li;if(sess.li===S.day)S.day++;S.xp+=50;}save();}
+    else if(!sess.practice){sess.words.forEach(it=>{const r=results.find(x=>x.id===it.id);grade(it.id,r?r.ok:true);});
+      if(!has(t))S.done[t]=sess.li;
+      if(!logArr().some(x=>x.d===t&&x.li===sess.li))logArr().push({d:t,li:sess.li});
+      if(sess.li===S.day)S.day++;else if(sess.li>S.day){S.day=sess.li+1;}
+      S.xp+=50;save();}
     else{results.forEach(r=>{if(!r.ok)grade(r.id,false);});save();}
     finish([...(sess.reviewResults||[]),...(sess.destResults||[])],results);});}
 function finish(rev,quiz){currentScreen='done';const all=[...rev,...quiz];const ok=all.filter(x=>x.ok).length;const wrong=all.filter(x=>!x.ok).map(x=>ALL[x.id]).filter(Boolean);paintHeader();const lv=levelOf(S.xp);
-  const title=sess.reviewOnly?'複習完成':sess.destOnly?'目的地衝刺完成':sess.consolidate?'鞏固訓練完成':'第 '+(sess.li+1)+' 課完成';
+  const title=sess.challenge?'挑戰完成':sess.reviewOnly?'複習完成':sess.destOnly?'目的地衝刺完成':sess.consolidate?'鞏固訓練完成':'第 '+(sess.li+1)+' 課完成';
   h(`<section class="card hero done" style="text-align:center"><div class="eyebrow gold">${title}</div>
     <div class="big pop" style="margin:14px 0 4px">${ok}<small> / ${all.length}</small></div><div class="q">答對題數 · 🔥 連續 ${streak()} 天 · <span class="xp">${S.xp} XP · ${esc(lv.name)}</span></div>
     ${(!sess.practice&&!sess.consolidate&&LESSONS[sess.li])?`<div style="margin-top:16px;display:flex;justify-content:center"><div class="stamp got pop" style="width:100px">${stampInner(sess.li)}</div></div><div class="q" style="margin-top:8px">護照多一枚印章</div>`:''}
     ${wrong.length?`<div style="text-align:left;margin-top:20px;border-top:1px solid var(--line);padding-top:12px"><div class="eyebrow">明天會再考這些</div>${wrong.map(w=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)"><b style="font-family:var(--display);font-size:17px;font-weight:500;color:#fff">${esc(w.en)}</b><span style="color:var(--muted)">${esc(w.zh)}</span></div>`).join('')}</div>`:`<p class="q" style="margin-top:16px">全對。答對的字會拉長複習間隔（1→3→7→14→30→60 天）。</p>`}
   </section>
+  ${(!sess.practice&&!sess.consolidate&&completedSet().size>=LESSONS.length)?`<section class="card hero" style="text-align:center;border-color:var(--gold)"><div class="eyebrow gold">56 / 56</div><h2 style="margin-top:6px">護照集滿了。你畢業了。</h2><p class="q" style="margin-top:6px">到護照頁領取證書，並解鎖挑戰模式與二周目。</p><div style="margin-top:12px"><button class="btn" onclick="passportScreen()">領取畢業證書</button></div></section>`:''}
   <div class="row"><button class="btn ghost" onclick="dataScreen()">看數據</button><button class="btn" onclick="home()">回首頁</button></div>`);
   sfx('done');if(!sess.practice)confetti();}
+
+/* ===== 畢業後：挑戰模式 / 二周目 ===== */
+function startChallenge(){const ids=shuffle(Object.keys(ALL)).slice(0,10);if(!ids.length)return home();
+  sess={li:null,practice:true,review:ids,words:[],reviewOnly:true,challenge:true,prodEarly:true};
+  const qs=ids.map(id=>makeQ(ALL[id],'review',true));
+  runQuiz('挑戰模式',qs,'review',(results)=>{results.forEach(r=>grade(r.id,r.ok));S.xp+=results.filter(r=>r.ok).length*5;save();sess.reviewResults=results;finish(results,[]);});}
+function startRound2(){if(!confirm('開始第 '+(S.round+1)+' 周目？56 課會從頭再走一遍，但題型直接進入拼字與排句。已有的記憶排程、XP、印章都保留。'))return;
+  S.round=(S.round||1)+1;S.day=0;S.startLesson=0;save();home();}
 
 /* ===== DESTINATION ===== */
 function findPack(q){q=q.trim().toLowerCase();if(!q)return null;for(const k in DEST_PACKS){if(DEST_PACKS[k].match.some(m=>q===m||q.includes(m)||m.includes(q)))return k;}return null;}
@@ -202,10 +257,15 @@ function dataScreen(){currentScreen='data';const P=plan();const R=retention();co
 
 /* ===== PASSPORT ===== */
 function stampInner(li){const L=LESSONS[li];if(!L)return '';const zh=L.t.split(' ')[0];const en=L.t.split(' ').slice(1).join(' ');return `<span style="font-size:9px;letter-spacing:.1em">${String(li+1).padStart(2,'0')}</span><b>${esc(en)}</b><span style="font-size:10px">${esc(zh)}</span>`;}
-function passportScreen(){currentScreen='passport';const got=new Set(Object.values(S.done).filter(v=>v>=0&&LESSONS[v]));const dates=Object.keys(S.done).sort();const lv=levelOf(S.xp);
-  h(`<section class="card hero"><div class="eyebrow gold">旅途護照 · ${esc(PROFILE?PROFILE.name:'旅人')}</div><h1>${got.size} 枚印章</h1><div class="level" style="margin-top:8px">${esc(lv.name)} · ${S.xp} XP${lv.next?' · 距「'+esc(lv.nextName)+'」還差 '+(lv.next-S.xp):''}</div>
-    <div class="stamps">${LESSONS.map((L,i)=>got.has(i)?`<div class="stamp got">${stampInner(i)}</div>`:`<div class="stamp">${String(i+1).padStart(2,'0')}</div>`).join('')}</div></section>
-  <section class="card"><h2>飛行日誌</h2><div style="margin-top:8px">${dates.length?dates.slice(-30).reverse().map(d=>`<div class="weak"><span>${d}</span><span class="q">${(S.done[d]>=0&&LESSONS[S.done[d]])?'第 '+(S.done[d]+1)+' 課 · '+esc(lessonName(S.done[d])):'鞏固日'}</span></div>`).join(''):'<p class="q">今天起飛第一課吧</p>'}</div></section>`,'passport');}
+function passportScreen(){currentScreen='passport';const got=completedSet();const lv=levelOf(S.xp);const grad=got.size>=LESSONS.length;const name=PROFILE?PROFILE.name:'旅人';
+  const byDay={};logArr().forEach(x=>{(byDay[x.d]=byDay[x.d]||[]).push(x.li);});Object.keys(S.done).forEach(d=>{if(!byDay[d])byDay[d]=[];});const dates=Object.keys(byDay).sort();
+  const gradDate=(()=>{if(!grad)return '';const ds=logArr().map(x=>x.d).sort();return ds[ds.length-1]||todayStr();})();
+  h(`${grad?`<section class="card hero" style="text-align:center;border-color:var(--gold)"><div class="eyebrow gold">CERTIFICATE · 環球旅人證書</div><h1 style="margin-top:8px">${esc(name)}</h1><p class="q" style="margin-top:6px">完成《旅途英語》全部 56 課 · 336 個單字 · 168 個常用句</p><p class="q">第 ${S.round} 周目 · ${gradDate}</p>
+    <div class="row" style="margin-top:16px"><button class="btn coral" onclick="startChallenge()">挑戰模式</button><button class="btn ghost" onclick="startRound2()">第 ${S.round+1} 周目</button></div></section>`:''}
+  <section class="card hero"><div class="eyebrow gold">旅途護照 · ${esc(name)}</div><h1>${got.size} / ${LESSONS.length} 枚印章</h1><div class="level" style="margin-top:8px">${esc(lv.name)} · ${S.xp} XP${lv.next?' · 距「'+esc(lv.nextName)+'」還差 '+(lv.next-S.xp):''}</div>
+    ${grad?'':`<p class="q" style="margin-top:10px">集滿 56 枚 → 領取畢業證書、解鎖「挑戰模式」（全教材隨機出題）與「二周目」（題型全面升級成拼字與排句）。</p>`}
+    <div class="stamps">${LESSONS.map((L,i)=>got.has(i)?`<div class="stamp got">${stampInner(i)}</div>`:`<div class="stamp">${String(i+1).padStart(2,'0')}</div>`).join('')}</section>
+  <section class="card"><h2>飛行日誌</h2><div style="margin-top:8px">${dates.length?dates.slice(-30).reverse().map(d=>`<div class="weak"><span>${d}</span><span class="q">${byDay[d].length?byDay[d].map(li=>'第 '+(li+1)+' 課').join('、'):'鞏固日'}</span></div>`).join(''):'<p class="q">今天起飛第一課吧</p>'}</div></section>`,'passport');}
 
 /* ===== INSTALL ===== */
 function installScreen(){currentScreen='install';const ios=/iPhone|iPad/.test(navigator.userAgent);
@@ -231,7 +291,7 @@ function copyUrl(){const u=appUrl();(navigator.clipboard?navigator.clipboard.wri
 /* ===== BOOT ===== */
 (async function boot(){stars();rebuildAll();initSb();
   if('serviceWorker' in navigator){try{
-    navigator.serviceWorker.register('./sw.js?v5');
+    navigator.serviceWorker.register('./sw.js?v6');
     let reloaded=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloaded)return;reloaded=true;location.reload();});
   }catch(e){}}
   if(!sb){authScreen();return;}
