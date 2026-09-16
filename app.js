@@ -44,26 +44,51 @@ async function onSignedIn(session){USER=session.user;CURRENT_UID=USER.id;loadLoc
 /* ===== ONBOARDING：名字 → 程度測驗 → 選起點 → 目的地 ===== */
 let OB={};
 const START_POINTS=[[0,'從第 1 課開始','打招呼、數字、時間、家人、食物——把基礎打穩'],[7,'從第 8 課開始','跳過最基礎的招呼與數字，從家人、飲食、日常作息開始'],[14,'從第 15 課開始','直接進入機場、飯店、餐廳、購物等旅遊情境']];
-function placementItems(){ // 從整套教材平均抽 12 個單字：前段 4、中段 4、後段 4
-  const pick=(from,to,n)=>{const pool=[];for(let li=from;li<to;li++)LESSONS[li].w.forEach((w,i)=>pool.push(li+'w'+i));return shuffle(pool).slice(0,n);};
-  return [...pick(0,7,4),...pick(7,28,4),...pick(28,56,4)];}
+function placementItems(){ // 舊版相容
+  return placementPlan().map(x=>x.id);}
+/* 程度測驗：三個難度段 × 5 題，題型隨難度升級（選擇→聽力→拼字→排句），拼字/排句無法用猜的 */
+function placementPlan(){
+  const words=(from,to)=>{const p=[];for(let li=from;li<to;li++)LESSONS[li].w.forEach((w,i)=>p.push(li+'w'+i));return shuffle(p);};
+  const sents=(from,to)=>{const p=[];for(let li=from;li<to;li++)LESSONS[li].s.forEach((x,i)=>{if(String(x[0]).trim().split(/\s+/).length>=3&&String(x[0]).trim().split(/\s+/).length<=7)p.push(li+'s'+i);});return shuffle(p);};
+  const A=words(0,14),B=words(14,35),C=words(35,56),CS=sents(35,56);
+  const plan=[];
+  const push=(arr,n,kind,band)=>{for(let i=0;i<n&&arr.length;i++)plan.push({id:arr.shift(),kind,band});};
+  push(A,4,'zh2en',1);push(A,1,'listen',1);
+  push(B,2,'zh2en',2);push(B,1,'listen',2);push(B,2,'type',2);
+  push(C,3,'type',3);push(CS,2,'build',3);
+  if(plan.filter(x=>x.band===3).length<5)push(C,5-plan.filter(x=>x.band===3).length,'type',3);
+  return plan;}
+const PLACE_MAX=5*1+5*2+5*3;
+function placementScore(plan,results){let pts=0;
+  results.forEach(r=>{const p=plan.find(x=>x.id===r.id);if(p&&r.ok)pts+=p.band;});
+  return {pts,max:PLACE_MAX,pct:pts/PLACE_MAX,ok:results.filter(r=>r.ok).length,n:results.length};}
+function placementSuggest(pct){return pct<0.34?0:pct<0.67?1:2;}
+/* 共用：跑一次程度測驗，done(score, results, plan) */
+function runPlacement(done){const plan=placementPlan();rebuildAll();
+  const qs=plan.map(p=>makeQ(ALL[p.id],'review',false,p.kind));
+  currentScreen='placement';
+  runQuiz('程度測驗',qs,'placement',(results)=>{
+    const sc=placementScore(plan,results);
+    // 答對的字依難度段給不同的記憶起點：越難答對的，下次間隔越長
+    results.forEach(r=>{const p=plan.find(x=>x.id===r.id);if(!r.ok||!p)return;
+      const n=p.band===3?4:p.band===2?3:2;
+      S.srs[r.id]={n,due:addDays(todayStr(),INTERVALS[n-1]||7),seen:1,miss:0};});
+    done(sc,results,plan);},{noRetry:true});}
+function placeMsg(pct){return pct<0.34?'基礎字還沒穩，建議從第 1 課開始，前幾課會走得很快。'
+  :pct<0.67?'看得懂、但還寫不太出來。建議從第 8 課開始，把日常字補齊再進旅遊情境。'
+  :'拼字與造句都答得出來，直接進旅遊情境最有效率；前面的課隨時可以回頭補。';}
 function onboard(step){step=step||0;currentScreen='onboard';
   if(step===0)h(`<div class="auth"><div class="logo">歡迎登機<small>STEP 1 / 4</small></div><section class="card"><h2>怎麼稱呼你？</h2><input class="input" id="obName" placeholder="你的名字或暱稱" style="margin-top:14px" value="${esc(OB.name||'')}" onkeydown="if(event.key==='Enter')document.getElementById('obNext').click()"><div style="margin-top:12px"><button class="btn" id="obNext" onclick="OB.name=document.getElementById('obName').value.trim().slice(0,24)||'旅人';onboard(1)">下一步</button></div></section></div>`);
-  else if(step===1)h(`<div class="auth"><div class="logo">程度測驗<small>STEP 2 / 4 · 約 2 分鐘</small></div><section class="card"><h2>先做 12 題，找出適合你的起點</h2><p class="q" style="margin-top:6px">單字從整套教材平均抽出，不用緊張、不會就猜。做完系統會給建議，最後還是你自己決定從哪裡開始。</p>
+  else if(step===1)h(`<div class="auth"><div class="logo">程度測驗<small>STEP 2 / 4 · 約 3 分鐘</small></div><section class="card"><h2>15 題分級測驗</h2><p class="q" style="margin-top:6px">從簡單到困難分三段：前段是選擇題，中段加入聽力與拼字，後段要自己拼出單字、排出句子——猜不出來的題型才測得準。不會就直接送出，系統會告訴你答案。</p>
+    <div class="plan" style="margin-top:14px"><div><span>第 1 段 · 基礎字</span><span>5 題 · 每題 1 分</span></div><div><span>第 2 段 · 日常與旅遊</span><span>5 題 · 每題 2 分</span></div><div><span>第 3 段 · 進階與造句</span><span>5 題 · 每題 3 分</span></div></div>
     <div style="margin-top:14px"><button class="btn" onclick="placementTest()">開始測驗</button></div><button class="btn quiet" style="margin-top:6px" onclick="OB.score=null;onboard(2)">跳過測驗，我自己選</button></section></div>`);
-  else if(step===2){const sc=OB.score;const sug=sc==null?null:(sc.pct<0.5?0:sc.pct<0.85?1:2);
+  else if(step===2){const sc=OB.score;const sug=sc==null?null:placementSuggest(sc.pct);
     h(`<div class="auth"><div class="logo">你的起點<small>STEP 3 / 4</small></div><section class="card">
-    ${sc?`<div class="eyebrow gold">測驗結果</div><h2 style="margin-top:6px">${sc.ok} / ${sc.n} 題正確</h2><p class="q" style="margin-top:6px">${sc.pct<0.5?'基礎字還不熟，建議從頭開始，前幾課會很快。':sc.pct<0.85?'基礎不錯，可以跳過最簡單的部分。':'大部分都會了，直接進旅遊情境最有效率；之前的課隨時可以回頭練。'}</p>`:`<h2>你想從哪裡開始？</h2>`}
+    ${sc?`<div class="eyebrow gold">測驗結果</div><h2 style="margin-top:6px">${sc.pts} / ${sc.max} 分<span class="q" style="font-weight:400"> （答對 ${sc.ok}/${sc.n} 題）</span></h2><p class="q" style="margin-top:6px">${placeMsg(sc.pct)}</p>`:`<h2>你想從哪裡開始？</h2>`}
     <div class="opts" style="margin-top:14px">${START_POINTS.map((o,i)=>`<button class="opt" onclick="OB.start=${o[0]};onboard(3)"><b>${o[1]}${sug===i?' <span class="xp">建議</span>':''}</b><div class="q">${o[2]}</div></button>`).join('')}</div>
     <p class="q" style="margin-top:10px">之後在「設定 → 重新測程度／改起點」隨時可以改。</p></section></div>`);}
   else if(step===3)h(`<div class="auth"><div class="logo">目的地<small>STEP 4 / 4</small></div><section class="card"><h2>最近要去哪裡？</h2><p class="q" style="margin-top:6px">可以先跳過，之後在「目的地」分頁設定。</p><div class="chips">${Object.keys(DEST_PACKS).slice(0,12).map(k=>`<button class="chip" onclick="OB.dest='${k}';finishOnboard()">${esc(DEST_PACKS[k].name)}</button>`).join('')}</div><div style="margin-top:14px"><button class="btn ghost" onclick="finishOnboard()">先跳過</button></div></section></div>`);}
-function placementTest(){const ids=placementItems();rebuildAll();
-  const qs=ids.map((id,i)=>makeQ(ALL[id],'review',false,i%2?'zh2en':'en2zh'));
-  currentScreen='placement';
-  runQuiz('程度測驗',qs,'placement',(results)=>{const ok=results.filter(r=>r.ok).length;OB.score={ok,n:results.length,pct:ok/results.length};
-    // 測驗答對的字直接標成已認得（不用再從零學），答錯的不記
-    results.forEach(r=>{if(r.ok){S.srs[r.id]={n:2,due:addDays(todayStr(),7),seen:1,miss:0};}});
-    onboard(2);},{noRetry:true});}
+function placementTest(){runPlacement((sc)=>{OB.score=sc;onboard(2);});}
 function applyStart(start){S.day=Math.max(S.day,start);S.startLesson=start;}
 async function finishOnboard(){PROFILE={id:CURRENT_UID,name:OB.name||'旅人',level:OB.start===14?'intermediate':OB.start===7?'elementary':'beginner',email:USER?USER.email:null};
   applyStart(OB.start||0);
@@ -75,15 +100,14 @@ async function finishOnboard(){PROFILE={id:CURRENT_UID,name:OB.name||'旅人',le
 function relevelScreen(){currentScreen='relevel';
   h(`<section class="card"><div class="eyebrow gold">重新選擇起點</div><h1>換一個起點</h1><p class="q" style="margin-top:6px">目前進度：第 ${Math.min(S.day+1,LESSONS.length)} 課。往前跳不會刪除任何紀錄；往回選會從那一課重新往下走，已完成的印章保留。</p>
     <div class="opts" style="margin-top:14px">${START_POINTS.map(o=>`<button class="opt" onclick="S.day=${o[0]};S.startLesson=${o[0]};save();home()"><b>${o[1]}</b><div class="q">${o[2]}</div></button>`).join('')}
-      <button class="opt" onclick="OB={name:PROFILE?PROFILE.name:'旅人'};placementTest2()"><b>重做程度測驗</b><div class="q">12 題，做完再選起點</div></button></div></section>
+      <button class="opt" onclick="OB={name:PROFILE?PROFILE.name:'旅人'};placementTest2()"><b>重做程度測驗</b><div class="q">15 題分級測驗，做完再選起點</div></button></div></section>
   <section class="card"><div class="eyebrow coral">危險區</div><h3 style="margin-top:6px">重設所有進度</h3><p class="q" style="margin-top:6px">清空課程進度、記憶排程、XP、印章與目的地（帳號保留）。無法復原。</p>
     <div class="field"><input id="rsIn" placeholder="輸入「重設」以確認"><button class="btn sm coral" onclick="resetAll()">重設</button></div><p class="err" id="rsErr"></p></section>
   <button class="btn ghost" onclick="home()">回首頁</button>`,'home');}
-function placementTest2(){const ids=placementItems();const qs=ids.map((id,i)=>makeQ(ALL[id],'review',false,i%2?'zh2en':'en2zh'));
-  runQuiz('程度測驗',qs,'placement',(results)=>{const ok=results.filter(r=>r.ok).length;const pct=ok/results.length;const sug=pct<0.5?0:pct<0.85?1:2;
-    h(`<section class="card"><div class="eyebrow gold">測驗結果</div><h1>${ok} / ${results.length}</h1><p class="q" style="margin-top:6px">建議：${START_POINTS[sug][1]}</p>
-      <div class="opts" style="margin-top:14px">${START_POINTS.map((o,i)=>`<button class="opt" onclick="S.day=${o[0]};S.startLesson=${o[0]};save();home()"><b>${o[1]}${sug===i?' <span class=\'xp\'>建議</span>':''}</b><div class="q">${o[2]}</div></button>`).join('')}</div></section>
-      <button class="btn ghost" onclick="home()">維持目前進度</button>`,'home');},{noRetry:true});}
+function placementTest2(){runPlacement((sc)=>{const sug=placementSuggest(sc.pct);
+  h(`<section class="card"><div class="eyebrow gold">測驗結果</div><h1>${sc.pts} / ${sc.max} 分</h1><p class="q" style="margin-top:6px">答對 ${sc.ok}/${sc.n} 題 · ${placeMsg(sc.pct)}</p>
+    <div class="opts" style="margin-top:14px">${START_POINTS.map((o,i)=>`<button class="opt" onclick="S.day=${o[0]};S.startLesson=${o[0]};save();home()"><b>${o[1]}${sug===i?' <span class=\'xp\'>建議</span>':''}</b><div class="q">${o[2]}</div></button>`).join('')}</div></section>
+    <button class="btn ghost" onclick="home()">維持目前進度</button>`,'home');});}
 async function resetAll(){const v=(document.getElementById('rsIn')||{}).value||'';if(v.trim()!=='重設'){document.getElementById('rsErr').textContent='請輸入「重設」兩個字';return;}
   const keep={autoplay:S.autoplay,sound:S.sound};
   S={day:0,done:{},log:[],round:1,srs:{},ev:[],xp:0,autoplay:keep.autoplay,sound:keep.sound,dest:null,updatedAt:Date.now(),v:4};rebuildAll();
@@ -253,7 +277,7 @@ function dataScreen(){currentScreen='data';const P=plan();const R=retention();co
     <div class="bars" style="height:70px">${fc.map(x=>`<div class="bar gold" style="height:${Math.max(4,Math.round(x.n/maxFc*100))}%" data-t="${x.d.slice(5)} · ${x.n} 題" tabindex="0"></div>`).join('')}</div>
     <div class="axis"><span>今天</span><span>+6 天</span></div></section>
   <section class="card"><h2>最常錯的字</h2><p class="q">錯誤率 = 答錯次數 ÷ 作答次數；這些會被排進鞏固日</p><div style="margin-top:8px">${weak.length?weak.map(w=>`<div class="weak"><div><b>${esc(ALL[w.id].en)}</b> <span class="q">${esc(ALL[w.id].zh)}</span></div><span class="pct">${Math.round(w.rate*100)}% 錯</span></div>`).join(''):'<p class="q">還沒有足夠資料</p>'}</div></section>
-  <section class="card"><h3>記憶法是怎麼運作的</h3><p class="q" style="margin-top:6px">每個字有一個強度等級。答對就把下次出現的時間拉長（1→3→7→14→30→60→120 天），答錯就歸零、明天重考。題型也跟著等級升級：先認得（選擇題）→ 聽得懂（聽力）→ 用得出來（拼字、排句）。答錯的題目在同一輪結束前會立刻重考一次。</p></section>`,'data');}
+  <section class="card"><h3>記憶法是怎麼運作的</h3><p class="q" style="margin-top:6px">每個字有一個強度等級。答對就把下次出現的時間拉長（1→3→7→14→30→60→120 天），答錯就歸零、明天重考。題型也跟著等級升級：先認得（選擇題）→ 聽得懂（聽力）→ 用得出來（拼字、排句）。選擇題的干擾選項一律從同主題、長度相近的字裡挑，不能靠刪去法猜。答錯的題目在同一輪結束前會立刻重考一次。</p></section>`,'data');}
 
 /* ===== PASSPORT ===== */
 function stampInner(li){const L=LESSONS[li];if(!L)return '';const zh=L.t.split(' ')[0];const en=L.t.split(' ').slice(1).join(' ');return `<span style="font-size:9px;letter-spacing:.1em">${String(li+1).padStart(2,'0')}</span><b>${esc(en)}</b><span style="font-size:10px">${esc(zh)}</span>`;}
@@ -291,7 +315,7 @@ function copyUrl(){const u=appUrl();(navigator.clipboard?navigator.clipboard.wri
 /* ===== BOOT ===== */
 (async function boot(){stars();rebuildAll();initSb();
   if('serviceWorker' in navigator){try{
-    navigator.serviceWorker.register('./sw.js?v6');
+    navigator.serviceWorker.register('./sw.js?v8');
     let reloaded=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloaded)return;reloaded=true;location.reload();});
   }catch(e){}}
   if(!sb){authScreen();return;}
