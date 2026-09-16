@@ -113,11 +113,60 @@ function norm(s){return s.toLowerCase().replace(/[^a-z0-9' ]/g,' ').replace(/\s+
 function stepbar(label,frac){return `<div class="stepbar"><span class="eyebrow">${label}</span><div class="progress"><i style="width:${Math.round(frac*100)}%"></i></div><button class="btn quiet" style="width:auto;padding:4px 8px" onclick="home()">離開</button></div>`;}
 
 /* ===== QUESTION BUILDER ===== */
+/* 課程主題分群：同群的字彙在語意上接近，用來產生「不能用刪去法猜」的干擾選項 */
+const LGROUP=('bcbbbbb'+'lfflllc'+'ttttttt'+'hhhhh'+'tt'+'fffffff'+'sssss'+'msyyymmzs'+'ccccccc');
+function groupOf(li){return (li==null||li<0)?'?':(LGROUP[li]||'?');}
+const FIELDS=[
+  ['food',/[吃喝飯麵菜肉魚湯茶咖啡果餐點甜辣鹹杯盤碗筷味食飲]/],
+  ['travel',/[車票機站飛船艙登李護照簽證航路轉搭]/],
+  ['place',/[店館場室房樓廳院街市區城國鎮園]/],
+  ['time',/[天日月年點時分早晚午夜週末鐘今明昨期]/],
+  ['people',/[人朋友家爸媽兄弟姊妹孩先生小姐同事闆客]/],
+  ['money',/[錢元價費折扣付帳單現金卡貴宜便收找]/],
+  ['body',/[頭手腳眼耳鼻身痛病藥醫傷燒冒咳]/],
+  ['feel',/[開心快樂難過生氣累怕喜歡討厭覺得緊張興奮]/],
+  ['size',/[大小長短高矮寬窄號尺色紅藍綠黑白黃]/],
+  ['ask',/[請問怎麼哪裡什麼為誰幾嗎呢可以能要]/]
+];
+function fieldOf(it){const z=String(it.zh||'');for(let i=0;i<FIELDS.length;i++){if(FIELDS[i][1].test(z))return FIELDS[i][0];}return '';}
+function posOf(it){const e=String(it.en||'').toLowerCase().trim();const z=String(it.zh||'');
+  if(/的$/.test(z))return 'adj';
+  if(/^(to )/.test(e)||/(ing)$/.test(e))return 'v';
+  if(/(ly)$/.test(e))return 'adv';
+  if(/[？?]$/.test(z)||/\?$/.test(e))return 'q';
+  return 'n';}
+function cjkLen(s){return [...String(s||'')].length;}
+/* 相似度：分數越高＝越像本題答案＝越難用刪去法排除。mode 'en' 看英文外型，'zh' 看中文語意 */
+function simScore(a,b,mode){let s=0;
+  if(a.li!=null&&b.li!=null){const d=Math.abs(a.li-b.li);
+    s+= d===0?70:d<=2?44:d<=5?26:d<=10?12:0;}
+  if(groupOf(a.li)!=='?'&&groupOf(a.li)===groupOf(b.li))s+=40;
+  const fa=fieldOf(a),fb=fieldOf(b);if(fa&&fa===fb)s+=34;
+  if(posOf(a)===posOf(b))s+=22;
+  const zd=Math.abs(cjkLen(a.zh)-cjkLen(b.zh));
+  const wa=String(a.en).trim().split(/\s+/).length,wb=String(b.en).trim().split(/\s+/).length;
+  const ld=Math.abs(String(a.en).length-String(b.en).length);
+  if(mode==='en'){
+    s+= wa===wb?34:Math.abs(wa-wb)===1?12:0;
+    s+= ld<=1?30:ld<=3?18:ld<=6?7:0;
+    if(String(a.en)[0]&&String(a.en)[0].toLowerCase()===String(b.en)[0].toLowerCase())s+=14;
+    s+= zd<=1?8:0;
+  }else{
+    s+= zd===0?34:zd===1?20:zd===2?8:0;
+    s+= wa===wb?10:0;
+    s+= ld<=3?6:0;
+  }
+  return s;}
 function makeQ(it,ctx,prodEarly,force){
-  // 干擾選項：排除任何與本題「英文或中文」相同的項目，避免出現兩個都對的選項
+  // 干擾選項：排除任何與本題「英文或中文」相同的項目，再依相似度挑最難排除的
   const pool=Object.values(ALL).filter(x=>x.type===it.type&&x.id!==it.id&&x.en!==it.en&&x.zh!==it.zh);
-  const pickDistractors=(field)=>{const seen=new Set([it[field]]);const out=[];
-    for(const x of shuffle(pool)){const v=x[field];if(!v||seen.has(v))continue;seen.add(v);out.push(v);if(out.length===3)break;}
+  const pickDistractors=(fieldName)=>{const mode=fieldName==='en'?'en':'zh';
+    const seen=new Set([it[fieldName]]);const cand=[];
+    for(const x of pool){const v=x[fieldName];if(!v||seen.has(v))continue;seen.add(v);cand.push([simScore(it,x,mode)+Math.random()*12,v]);}
+    cand.sort((p,q)=>q[0]-p[0]);
+    const top=cand.slice(0,Math.max(3,Math.min(10,Math.ceil(cand.length*0.06))));
+    const out=shuffle(top).slice(0,3).map(p=>p[1]);
+    for(let i=0;out.length<3&&i<cand.length;i++){if(out.indexOf(cand[i][1])<0)out.push(cand[i][1]);}
     return out;};
   let n=stageOf(it.id);if(prodEarly||S.round>1)n+=1;let kind;
   if(ctx==='new')kind=it.type==='w'?['en2zh','zh2en','listen'][Math.floor(Math.random()*3)]:['listen','en2zh'][Math.floor(Math.random()*2)];
