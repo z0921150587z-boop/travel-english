@@ -1,4 +1,4 @@
-const VER='v8';
+const VER='v9';
 const CACHE='travel-english-'+VER;
 const ASSETS=['./','./index.html?'+VER,'./styles.css?'+VER,'./config.js?'+VER,'./data.js?'+VER,'./dest.js?'+VER,'./engine.js?'+VER,'./app.js?'+VER,'./manifest.json','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
