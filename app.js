@@ -1,5 +1,5 @@
 /* ===== SUPABASE ===== */
-let sb=null,CURRENT_UID=null,USER=null,PROFILE=null;
+let sb=null,CURRENT_UID=null,USER=null,PROFILE=null,sbOffline=false;
 function initSb(){if(!window.supabase||!CONFIG.SUPABASE_URL||CONFIG.SUPABASE_URL.includes('YOUR-'))return null;try{sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY);}catch(e){sb=null;}return sb;}
 let saveTimer=null;
 function cloudSave(){if(!sb||!CURRENT_UID)return;clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{
@@ -22,13 +22,16 @@ function authScreen(msg,mode){currentScreen='auth';mode=mode||'login';
   <div style="margin-top:10px"><button class="btn" id="goBtn" onclick="authGo('${mode}')">${mode==='signup'?'建立並開始':'登入'}</button></div>
   <p class="err" id="authErr" style="margin-top:8px">${msg||''}</p>
   <div class="row" style="margin-top:6px">${mode==='signup'?'<button class="btn quiet" onclick="authScreen(\'\',\'login\')">已有帳號？登入</button>':'<button class="btn quiet" onclick="authScreen(\'\',\'signup\')">還沒有帳號？建立</button><button class="btn quiet" onclick="forgot()">忘記密碼</button>'}</div></section>
-  ${!sb?'<p class="tip">（尚未設定資料庫，先以訪客模式試用）</p><button class="btn ghost" onclick="guest()">訪客試用</button>':''}
+  ${(!sb||sbOffline)?`<section class="card" style="border-style:dashed;background:transparent;box-shadow:none"><div class="eyebrow coral">${sb?'連不上帳號伺服器':'尚未設定資料庫'}</div><p class="q" style="margin-top:6px">${sb?'可能是網路不穩或伺服器休眠中。你還是可以先用訪客模式學習，進度存在這支手機上，之後登入會繼續。':'先以訪客模式試用，進度存在這支手機上。'}</p><div class="row" style="margin-top:12px"><button class="btn" onclick="guest()">用訪客模式開始學</button><button class="btn ghost" onclick="location.reload()">重新連線</button></div></section>`:''}
   </div>`);}
 async function authGo(mode){const em=document.getElementById('em').value.trim();const pw=document.getElementById('pw').value;const err=document.getElementById('authErr');
   if(!/^\S+@\S+\.\S+$/.test(em)){err.textContent='請輸入正確的 Email';return;}if(pw.length<6){err.textContent='密碼至少 6 碼';return;}
   document.getElementById('goBtn').disabled=true;err.textContent='';
-  const r=mode==='signup'?await sb.auth.signUp({email:em,password:pw}):await sb.auth.signInWithPassword({email:em,password:pw});
-  if(r.error){const m=r.error.message||'';err.textContent=/already registered|already exists/i.test(m)?'這個 Email 已有帳號，請直接登入':/Invalid login/i.test(m)?'Email 或密碼錯誤':'失敗：'+m;document.getElementById('goBtn').disabled=false;return;}
+  let r;try{r=mode==='signup'?await sb.auth.signUp({email:em,password:pw}):await sb.auth.signInWithPassword({email:em,password:pw});}
+  catch(e){sbOffline=true;authScreen('連不上帳號伺服器（可能休眠或網路不穩）。可以先用訪客模式學，進度不會不見。',mode);return;}
+  if(r.error){const m=r.error.message||'';
+    if(/fetch|network|Failed to fetch|retryable/i.test(m)){sbOffline=true;authScreen('連不上帳號伺服器（可能休眠或網路不穩）。可以先用訪客模式學，進度不會不見。',mode);return;}
+    err.textContent=/already registered|already exists/i.test(m)?'這個 Email 已有帳號，請直接登入':/Invalid login/i.test(m)?'Email 或密碼錯誤':'失敗：'+m;document.getElementById('goBtn').disabled=false;return;}
   if(!r.data.session){err.textContent='請到信箱確認後再登入';document.getElementById('goBtn').disabled=false;return;}
   await onSignedIn(r.data.session);}
 async function forgot(){const em=(document.getElementById('em')||{}).value||'';const err=document.getElementById('authErr');if(!/^\S+@\S+\.\S+$/.test(em.trim())){err.textContent='先在上面填 Email，再按忘記密碼';return;}
@@ -315,16 +318,23 @@ function copyUrl(){const u=appUrl();(navigator.clipboard?navigator.clipboard.wri
 /* ===== BOOT ===== */
 (async function boot(){stars();rebuildAll();initSb();
   if('serviceWorker' in navigator){try{
-    navigator.serviceWorker.register('./sw.js?v8');
+    navigator.serviceWorker.register('./sw.js?v9');
     let reloaded=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloaded)return;reloaded=true;location.reload();});
   }catch(e){}}
   if(!sb){authScreen();return;}
   try{
-    const {data}=await sb.auth.getSession();
+    // 伺服器沒回應就不要卡住：8 秒後改走離線／訪客路線
+    const to=new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
+    const {data}=await Promise.race([sb.auth.getSession(),to]);
     if(location.hash.includes('type=recovery')){resetScreen();return;}
     if(data&&data.session)await onSignedIn(data.session);
     else if(localStorage.getItem('te-guest-profile'))guest();
     else authScreen();
     sb.auth.onAuthStateChange((ev,session)=>{if(ev==='SIGNED_OUT'){CURRENT_UID=null;}if(ev==='PASSWORD_RECOVERY'){resetScreen();}});
-  }catch(e){authScreen('連線異常，請重新整理再試一次');}
+  }catch(e){
+    sbOffline=true;
+    // 已經是訪客或曾經登入過：直接用本機進度繼續，不要擋在登入頁
+    if(localStorage.getItem('te-guest-profile')){guest();return;}
+    authScreen('目前連不上帳號伺服器，可以先用訪客模式開始。');
+  }
 })();
