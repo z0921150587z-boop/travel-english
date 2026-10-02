@@ -21,7 +21,8 @@ function authScreen(msg,mode){currentScreen='auth';mode=mode||'login';
   <input class="input" id="pw" type="password" placeholder="密碼" style="margin-top:10px" autocomplete="${mode==='signup'?'new-password':'current-password'}" onkeydown="if(event.key==='Enter')authGo('${mode}')">
   <div style="margin-top:10px"><button class="btn" id="goBtn" onclick="authGo('${mode}')">${mode==='signup'?'建立並開始':'登入'}</button></div>
   <p class="err" id="authErr" style="margin-top:8px">${msg||''}</p>
-  <div class="row" style="margin-top:6px">${mode==='signup'?'<button class="btn quiet" onclick="authScreen(\'\',\'login\')">已有帳號？登入</button>':'<button class="btn quiet" onclick="authScreen(\'\',\'signup\')">還沒有帳號？建立</button><button class="btn quiet" onclick="forgot()">忘記密碼</button>'}</div></section>
+  <div class="row" style="margin-top:6px">${mode==='signup'?'<button class="btn quiet" onclick="authScreen(\'\',\'login\')">已有帳號？登入</button>':'<button class="btn quiet" onclick="authScreen(\'\',\'signup\')">還沒有帳號？建立</button><button class="btn quiet" onclick="forgot()">忘記密碼</button>'}</div>
+  ${mode==='signup'?'':'<p class="q" style="margin-top:6px;font-size:13px">忘記密碼：先在上面填好 Email，再按「忘記密碼」，系統會寄重設連結給你。</p>'}</section>
   ${(!sb||sbOffline)?`<section class="card" style="border-style:dashed;background:transparent;box-shadow:none"><div class="eyebrow coral">${sb?'連不上帳號伺服器':'尚未設定資料庫'}</div><p class="q" style="margin-top:6px">${sb?'可能是網路不穩或伺服器休眠中。你還是可以先用訪客模式學習，進度存在這支手機上，之後登入會繼續。':'先以訪客模式試用，進度存在這支手機上。'}</p><div class="row" style="margin-top:12px"><button class="btn" onclick="guest()">用訪客模式開始學</button><button class="btn ghost" onclick="location.reload()">重新連線</button></div></section>`:''}
   </div>`);}
 async function authGo(mode){const em=document.getElementById('em').value.trim();const pw=document.getElementById('pw').value;const err=document.getElementById('authErr');
@@ -34,8 +35,19 @@ async function authGo(mode){const em=document.getElementById('em').value.trim();
     err.textContent=/already registered|already exists/i.test(m)?'這個 Email 已有帳號，請直接登入':/Invalid login/i.test(m)?'Email 或密碼錯誤':'失敗：'+m;document.getElementById('goBtn').disabled=false;return;}
   if(!r.data.session){err.textContent='請到信箱確認後再登入';document.getElementById('goBtn').disabled=false;return;}
   await onSignedIn(r.data.session);}
-async function forgot(){const em=(document.getElementById('em')||{}).value||'';const err=document.getElementById('authErr');if(!/^\S+@\S+\.\S+$/.test(em.trim())){err.textContent='先在上面填 Email，再按忘記密碼';return;}
-  const {error}=await sb.auth.resetPasswordForEmail(em.trim(),{redirectTo:location.href.split('#')[0]});err.textContent=error?'寄送失敗：'+error.message:'重設信已寄出，請到信箱點連結後回來設定新密碼';}
+async function forgot(){
+  const emEl=document.getElementById('em');const em=(emEl?emEl.value:'').trim();const err=document.getElementById('authErr');
+  if(!/^\S+@\S+\.\S+$/.test(em)){err.textContent='請先在上面的 Email 欄位填入你的 Email，再按「忘記密碼」。';if(emEl)emEl.focus();return;}
+  err.textContent='寄送中…';
+  let res;
+  try{
+    const to=new Promise((_,rj)=>setTimeout(()=>rj(new Error('timeout')),8000));
+    res=await Promise.race([sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname}),to]);
+  }catch(e){sbOffline=true;authScreen('連不上帳號伺服器，現在沒辦法寄重設信。等伺服器恢復再試一次，或先用訪客模式學習。');return;}
+  if(res&&res.error){const m=res.error.message||'';
+    if(/fetch|network|retryable/i.test(m)){sbOffline=true;authScreen('連不上帳號伺服器，現在沒辦法寄重設信。等伺服器恢復再試一次，或先用訪客模式學習。');return;}
+    err.textContent='寄送失敗：'+m+'（免費方案每小時寄信有上限，過一下再試）';return;}
+  err.textContent='重設信已寄到 '+em+'。請到信箱找（記得看垃圾信匣），點信裡的連結回到這裡設定新密碼。';}
 function resetScreen(){currentScreen='reset';h(`<div class="auth"><div class="logo">旅途英語<small>NEW PASSWORD</small></div><section class="card"><h2>設定新密碼</h2><input class="input" id="pw" type="password" placeholder="新密碼（至少 6 碼）" style="margin-top:14px"><div style="margin-top:10px"><button class="btn" onclick="doReset()">儲存</button></div><p class="err" id="authErr"></p></section></div>`);}
 async function doReset(){const pw=document.getElementById('pw').value;const err=document.getElementById('authErr');if(pw.length<6){err.textContent='密碼至少 6 碼';return;}const {error}=await sb.auth.updateUser({password:pw});if(error){err.textContent=error.message;return;}const {data}=await sb.auth.getSession();history.replaceState(null,'',location.pathname);await onSignedIn(data.session);}
 async function signOut(){if(sb)await sb.auth.signOut();try{localStorage.removeItem('te-guest-profile');}catch(e){}CURRENT_UID=null;USER=null;PROFILE=null;S={day:0,done:{},log:[],round:1,srs:{},ev:[],xp:0,autoplay:true,sound:true,dest:null,updatedAt:0,v:4};rebuildAll();authScreen();}
@@ -318,7 +330,7 @@ function copyUrl(){const u=appUrl();(navigator.clipboard?navigator.clipboard.wri
 /* ===== BOOT ===== */
 (async function boot(){stars();rebuildAll();initSb();
   if('serviceWorker' in navigator){try{
-    navigator.serviceWorker.register('./sw.js?v9');
+    navigator.serviceWorker.register('./sw.js?v10');
     let reloaded=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(reloaded)return;reloaded=true;location.reload();});
   }catch(e){}}
   if(!sb){authScreen();return;}
